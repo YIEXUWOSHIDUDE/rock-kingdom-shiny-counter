@@ -26,10 +26,10 @@ def default_data_dir() -> Path:
 class AppSettings:
     window_title: str = ""
     client_size: tuple[int, int] | None = None
-    ocr_keywords: list[str] = field(default_factory=lambda: ["污染解除", "噩梦枷锁"])
+    ocr_keywords: list[str] = field(default_factory=lambda: ["写进了童话里"])
     ocr_min_confidence: float = 0.55
-    ocr_interval_ms: int = 750
-    ocr_enter_frames: int = 2
+    ocr_interval_ms: int = 200
+    ocr_enter_frames: int = 1
     ocr_exit_frames: int = 2
     opacity: float = 0.92
     click_through: bool = False
@@ -104,10 +104,10 @@ class AppData:
         settings = AppSettings(
             window_title=str(settings_raw.get("window_title", "")),
             client_size=tuple(map(int, client_size_raw)) if client_size_raw is not None else None,
-            ocr_keywords=[str(item) for item in settings_raw.get("ocr_keywords", ["污染解除", "噩梦枷锁"])],
+            ocr_keywords=[str(item) for item in settings_raw.get("ocr_keywords", ["写进了童话里"])],
             ocr_min_confidence=float(settings_raw.get("ocr_min_confidence", 0.55)),
-            ocr_interval_ms=int(settings_raw.get("ocr_interval_ms", 750)),
-            ocr_enter_frames=int(settings_raw.get("ocr_enter_frames", 2)),
+            ocr_interval_ms=int(settings_raw.get("ocr_interval_ms", 200)),
+            ocr_enter_frames=int(settings_raw.get("ocr_enter_frames", 1)),
             ocr_exit_frames=int(settings_raw.get("ocr_exit_frames", 2)),
             opacity=float(settings_raw.get("opacity", 0.92)),
             click_through=bool(settings_raw.get("click_through", False)),

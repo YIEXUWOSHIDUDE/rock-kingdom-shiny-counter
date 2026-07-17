@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from PySide6.QtCore import QThread, Signal
 
 from .capture import CaptureError, Win32Capture
 from .detection import PresenceGate
-from .ocr import EasyOCREngine, OCRError, OCRKeywordMatcher
+from .ocr import EasyOCREngine, OCRError, OCRKeywordMatcher, crop_notification_banner
 from .storage import AppSettings
 
 
@@ -60,9 +61,10 @@ class RecognitionWorker(QThread):
                     self.status_changed.emit("已暂停", -1.0)
                     self.msleep(150)
                     continue
+                scan_started = time.monotonic()
                 try:
                     frame, _ = capture.capture_client(self.settings.client_size)
-                    texts = engine.read(frame)
+                    texts = engine.read(crop_notification_banner(frame))
                     joined = " | ".join(item.text for item in texts)
                     self.ocr_text_changed.emit(joined)
                     match = matcher.match(texts)
@@ -84,6 +86,9 @@ class RecognitionWorker(QThread):
                 except OCRError as error:
                     self.stopped_with_error.emit(str(error))
                     return
-                self.msleep(self.settings.ocr_interval_ms)
+                elapsed_ms = int((time.monotonic() - scan_started) * 1000)
+                remaining_ms = max(0, self.settings.ocr_interval_ms - elapsed_ms)
+                if remaining_ms:
+                    self.msleep(remaining_ms)
         finally:
             capture.close()

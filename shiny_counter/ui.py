@@ -109,7 +109,7 @@ class SettingsDialog(QDialog):
         self.pity.setRange(1, 1_000_000)
         self.pity.setValue(data.counter.pity_limit)
         self.ocr_keywords = QLineEdit("，".join(data.settings.ocr_keywords))
-        self.ocr_keywords.setPlaceholderText("例如：污染解除，噩梦枷锁")
+        self.ocr_keywords.setPlaceholderText("例如：写进了童话里")
         self.ocr_confidence = QDoubleSpinBox()
         self.ocr_confidence.setRange(0.10, 1.0)
         self.ocr_confidence.setDecimals(2)
@@ -217,7 +217,7 @@ class HistoryDialog(QDialog):
 class OCRTextDialog(QDialog):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("最近一次整窗 OCR 结果")
+        self.setWindowTitle("最近一次横幅 OCR 结果")
         self.resize(640, 420)
         layout = QVBoxLayout(self)
         hint = QLabel("从下列文字中选择只在有效结算画面出现的短语，并填入设置中的 OCR 关键词。")
@@ -512,7 +512,7 @@ class OverlayWindow(QWidget):
         self.data.settings.client_size = client_size
         self._save()
         self._restart_recognition()
-        self.status_label.setText("窗口已选择，正在启动整窗 OCR")
+        self.status_label.setText("窗口已选择，正在启动横幅 OCR")
 
     def _remember_ocr_text(self, text: str) -> None:
         self.last_ocr_text = text
