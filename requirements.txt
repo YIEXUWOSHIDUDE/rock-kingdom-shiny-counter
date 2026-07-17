@@ -1,0 +1,5 @@
+PySide6==6.11.1
+opencv-python-headless==5.0.0.93
+mss==10.2.0
+pywin32==312; sys_platform == "win32"
+easyocr==1.7.2
