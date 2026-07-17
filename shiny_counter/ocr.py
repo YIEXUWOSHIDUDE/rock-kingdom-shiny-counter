@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+NOTIFICATION_BANNER_REGION = (0.28, 0.10, 0.72, 0.27)
+
+
 class OCRError(RuntimeError):
     pass
 
@@ -27,6 +30,17 @@ class OCRMatch:
 def normalize_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text).casefold()
     return re.sub(r"\s+", "", normalized)
+
+
+def crop_notification_banner(frame: Any) -> Any:
+    """Crop the top-centre notification banner using resolution-independent ratios."""
+    height, width = frame.shape[:2]
+    left_ratio, top_ratio, right_ratio, bottom_ratio = NOTIFICATION_BANNER_REGION
+    left = int(width * left_ratio)
+    top = int(height * top_ratio)
+    right = int(width * right_ratio)
+    bottom = int(height * bottom_ratio)
+    return frame[top:bottom, left:right]
 
 
 class OCRKeywordMatcher:

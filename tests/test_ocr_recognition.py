@@ -1,9 +1,18 @@
 import unittest
 
-from shiny_counter.ocr import OCRKeywordMatcher, OCRText
+import numpy as np
+
+from shiny_counter.ocr import OCRKeywordMatcher, OCRText, crop_notification_banner
 
 
 class OCRKeywordMatcherTests(unittest.TestCase):
+    def test_notification_banner_crop_uses_relative_coordinates(self) -> None:
+        frame = np.zeros((1170, 2532, 3), dtype=np.uint8)
+
+        cropped = crop_notification_banner(frame)
+
+        self.assertEqual(cropped.shape, (198, 1115, 3))
+
     def test_keyword_match_tolerates_spaces_and_ignores_low_confidence_text(self) -> None:
         matcher = OCRKeywordMatcher(["污染解除", "噩梦枷锁"], min_confidence=0.55)
 
