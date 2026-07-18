@@ -42,17 +42,17 @@ from .worker import RecognitionWorker
 APP_STYLE = """
 QWidget#overlay {
     background: #172033;
-    color: #f5f7ff;
+    color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 12px;
 }
-QLabel { color: #f5f7ff; }
-QLabel#count { font-size: 38px; font-weight: 700; color: #82d7ff; }
-QLabel#target { font-size: 15px; font-weight: 600; }
-QLabel#status { color: #9daac2; font-size: 11px; }
+QLabel { color: #ffffff; }
+QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
+QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
+QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
 QPushButton {
     background: #293852;
-    color: #f5f7ff;
+    color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 6px;
     padding: 5px 8px;
@@ -570,3 +570,4 @@ class OverlayWindow(QWidget):
         self._start_hotkeys()
         self._restart_recognition()
         self.status_label.setText("导入完成")
+
