@@ -2,13 +2,22 @@
 
 这是一个 Windows 计数器。它截取游戏客户端窗口，使用中文 OCR 寻找你设置的结算关键词，并在悬浮窗中累计保底次数。默认保底为 80 次。
 
-程序不会访问游戏数据库，不读取游戏进程内存，不注入游戏，不模拟按键，也不执行自动战斗。EasyOCR 第一次启动时需要联网下载中文模型；下载完成后可离线识别。计数、设置、OCR 模型和历史记录保存在 `%APPDATA%\RockKingdomShinyCounter\`。
+程序不会访问游戏数据库，不读取游戏进程内存，不注入游戏，不模拟按键，也不执行自动战斗。正式安装包已经内置 EasyOCR 中文模型，首次启动不需要联网下载。源代码运行时若模型缺失，会优先使用已校验的 ModelScope / GitCode 国内镜像，失败后才回退到 EasyOCR 官方 GitHub 源。计数、设置、OCR 模型和历史记录保存在 `%APPDATA%\RockKingdomShinyCounter\`。
 
 > 风险提示：官方公开口径禁止第三方辅助工具。即使本程序只读取屏幕，也不能保证账号不会受到处罚。请先向腾讯客服确认，主账号谨慎使用。
 
-## 环境与安装
+## 最低运行要求
 
-- Windows 10 或 Windows 11
+- Windows 10 22H2 或 Windows 11（64 位）
+- NVIDIA GeForce RTX 20/30/40/50 系显卡，CUDA 计算能力不低于 7.5
+- NVIDIA Windows 驱动 580.88 或更高版本
+- 至少 4 GB 显存、8 GB 内存，建议 16 GB 内存
+- 安装时至少预留 8 GB 磁盘空间
+
+程序只支持 NVIDIA GPU OCR，不提供 CPU 降级模式。显卡、驱动或安装包 CUDA 架构不满足要求时，会直接显示具体原因。
+
+## 源代码环境与安装
+
 - 64 位 Python 3.14
 - 洛克王国使用窗口化或无边框窗口模式
 
@@ -23,15 +32,16 @@ py -3.14 -m venv .venv
 python -m pip install --upgrade pip
 ```
 
-如果使用 NVIDIA GPU，先访问 [PyTorch 官方安装选择器](https://pytorch.org/get-started/locally/)，选择 Windows、Pip、Python 和与你显卡驱动匹配的 CUDA 版本，执行它生成的安装命令。然后继续：
+安装 PyTorch 2.13 的默认 CUDA 13.0 构建，然后继续安装其余依赖：
 
 ```powershell
+python -m pip install torch torchvision
 python -m pip install -r requirements.txt
-python -c "import torch; print('CUDA available:', torch.cuda.is_available(), 'CUDA:', torch.version.cuda)"
+python -c "import torch; print('CUDA available:', torch.cuda.is_available(), 'CUDA:', torch.version.cuda, 'architectures:', torch.cuda.get_arch_list())"
 python -m shiny_counter
 ```
 
-输出 `CUDA available: True` 才能启动 OCR。如果为 `False`，程序会明确报错，请修正 PyTorch CUDA 安装。
+必须输出 `CUDA available: True`。RTX 50 系还必须在架构列表中看到 `sm_120`；如果缺失，请确认安装的是 CUDA 13.0 构建。
 
 完成上述安装后，可以直接双击 `run.bat`。脚本会优先使用项目内的 `.venv`。
 
@@ -39,7 +49,7 @@ python -m shiny_counter
 
 1. 启动洛克王国客户端，使用窗口化或无边框窗口模式。
 2. 启动计数器，点击“选窗口”，选择游戏客户端。无需框选截图区域。
-3. 第一次启动会下载并加载 EasyOCR 中文模型，请等待状态栏显示 OCR 结果。
+3. 安装版会从安装包复制并加载 EasyOCR 中文模型，请等待状态栏显示 OCR 结果。
 4. 进入一次有效结算画面，点击“查看文字”。
 5. 从识别结果里找一个只在该结算画面出现的短语。
 6. 打开“设置”，把短语填入“OCR 关键词”。多个关键词用逗号分隔。

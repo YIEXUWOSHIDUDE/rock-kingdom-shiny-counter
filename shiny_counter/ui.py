@@ -327,7 +327,7 @@ class OverlayWindow(QWidget):
         super().showEvent(event)
         if sys.platform == "win32":
             try:
-                ctypes.windll.user32.SetWindowDisplayAffinity(int(self.winId()), 0x00000011)
+                ctypes.windll.user32.SetWindowDisplayAffinity(int(self.winId()), 0x00000000)
             except (AttributeError, OSError):
                 pass
 
