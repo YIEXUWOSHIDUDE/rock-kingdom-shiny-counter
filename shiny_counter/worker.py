@@ -36,7 +36,7 @@ class RecognitionWorker(QThread):
         self._run_ocr()
 
     def _run_ocr(self) -> None:
-        self.status_changed.emit("正在加载中文 OCR 模型，首次运行可能需要下载", -1.0)
+        self.status_changed.emit("正在检查 NVIDIA GPU 并准备中文 OCR 模型", -1.0)
         capture = None
         try:
             capture = Win32Capture(self.settings.window_title)
