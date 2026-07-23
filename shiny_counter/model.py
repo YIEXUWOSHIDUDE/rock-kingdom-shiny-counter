@@ -35,6 +35,16 @@ class PityRound:
         if self.pity_limit < 1:
             raise ValueError("round pity_limit must be positive")
 
+    @property
+    def summary(self) -> str:
+        if self.attempts < self.pity_limit:
+            early_by = self.pity_limit - self.attempts
+            return f"{self.attempts}次出（{self.pity_limit}次保底，提前{early_by}次）"
+        if self.attempts == self.pity_limit:
+            return f"{self.attempts}次出（正好保底）"
+        over_by = self.attempts - self.pity_limit
+        return f"{self.attempts}次出（超过{self.pity_limit}次保底{over_by}次）"
+
 
 @dataclass(slots=True)
 class CounterState:

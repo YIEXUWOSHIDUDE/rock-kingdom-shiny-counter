@@ -191,9 +191,9 @@ class HistoryDialog(QDialog):
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel("保底轮次记录"))
-        round_table = QTableWidget(0, 6)
+        round_table = QTableWidget(0, 4)
         round_table.setHorizontalHeaderLabels(
-            ["轮次", "结束时间", "本轮次数", "保底上限", "结果", "来源"]
+            ["轮次", "出货记录", "结束时间", "记录方式"]
         )
         round_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         round_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -205,11 +205,9 @@ class HistoryDialog(QDialog):
             row = round_table.rowCount()
             round_table.insertRow(row)
             values = [
-                str(round_number),
+                f"第{round_number}轮",
+                completed.summary,
                 completed.at.replace("T", " ")[:19],
-                str(completed.attempts),
-                str(completed.pity_limit),
-                "达到保底" if completed.reached_pity else "提前结束",
                 source_names.get(completed.source, completed.source),
             ]
             for column, value in enumerate(values):
@@ -472,7 +470,7 @@ class OverlayWindow(QWidget):
             self._refresh_display()
             if completed is not None:
                 self.status_label.setText(
-                    f"第 {len(self.data.counter.rounds)} 轮已记录：{completed.attempts} 次"
+                    f"第{len(self.data.counter.rounds)}轮已记录：{completed.summary}"
                 )
 
     def _toggle_pause(self) -> None:
