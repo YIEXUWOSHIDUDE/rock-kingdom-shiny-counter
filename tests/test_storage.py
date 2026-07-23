@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import zipfile
@@ -7,6 +8,18 @@ from shiny_counter.storage import DataCorruptError, DataStore
 
 
 class DataStoreTests(unittest.TestCase):
+    def test_overlay_position_is_locked_by_default_and_unlock_choice_survives_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+
+            self.assertTrue(data.settings.position_locked)
+
+            data.settings.position_locked = False
+            store.save(data)
+
+            self.assertFalse(store.load().settings.position_locked)
+
     def test_counter_and_settings_survive_a_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DataStore(Path(directory))
@@ -26,6 +39,50 @@ class DataStoreTests(unittest.TestCase):
             self.assertEqual(restored.settings.window_title, "洛克王国：世界")
             self.assertEqual(restored.settings.client_size, (1920, 1080))
             self.assertFalse((Path(directory) / "data.json.tmp").exists())
+
+    def test_completed_pity_rounds_survive_a_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+            data.counter.pity_limit = 2
+            data.counter.increment(source="auto", score=0.96)
+            data.counter.increment(source="auto", score=0.97)
+            data.counter.reset(source="manual")
+            store.save(data)
+
+            restored = store.load().counter.rounds
+
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(restored[0].attempts, 2)
+            self.assertEqual(restored[0].pity_limit, 2)
+            self.assertTrue(restored[0].reached_pity)
+            self.assertEqual(restored[0].source, "manual")
+
+    def test_old_reset_history_is_backfilled_as_an_explicit_round(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+            for _ in range(61):
+                data.counter.increment(source="auto", score=0.96)
+            data.counter.reset(source="manual")
+            legacy_payload = data.to_dict()
+            legacy_payload["counter"].pop("rounds")
+            store.root.mkdir(parents=True, exist_ok=True)
+            store.path.write_text(
+                json.dumps(legacy_payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            restored_data = store.load()
+            restored = restored_data.counter.rounds
+
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(restored[0].attempts, 61)
+            self.assertIsNone(restored[0].pity_limit)
+            self.assertEqual(restored[0].summary, "61次出（旧记录）")
+
+            store.save(restored_data)
+            self.assertEqual(len(store.load().counter.rounds), 1)
 
     def test_ocr_settings_survive_a_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -21,12 +21,41 @@ class HistoryEvent:
 
 
 @dataclass(slots=True)
+class PityRound:
+    attempts: int
+    pity_limit: int | None
+    reached_pity: bool | None
+    source: str
+    at: str = field(default_factory=utc_now)
+    id: str = field(default_factory=lambda: str(uuid4()))
+
+    def __post_init__(self) -> None:
+        if self.attempts < 1:
+            raise ValueError("round attempts must be positive")
+        if self.pity_limit is not None and self.pity_limit < 1:
+            raise ValueError("round pity_limit must be positive")
+
+    @property
+    def summary(self) -> str:
+        if self.pity_limit is None or self.reached_pity is None:
+            return f"{self.attempts}次出（旧记录）"
+        if self.attempts < self.pity_limit:
+            early_by = self.pity_limit - self.attempts
+            return f"{self.attempts}次出（{self.pity_limit}次保底，提前{early_by}次）"
+        if self.attempts == self.pity_limit:
+            return f"{self.attempts}次出（正好保底）"
+        over_by = self.attempts - self.pity_limit
+        return f"{self.attempts}次出（超过{self.pity_limit}次保底{over_by}次）"
+
+
+@dataclass(slots=True)
 class CounterState:
     target_name: str = "异色宠物"
     pity_limit: int = 80
     count: int = 0
     pity_reached: bool = False
     history: list[HistoryEvent] = field(default_factory=list)
+    rounds: list[PityRound] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.pity_limit < 1:
@@ -80,15 +109,25 @@ class CounterState:
         )
         return True
 
-    def reset(self) -> None:
+    def reset(self, *, source: str = "manual") -> PityRound | None:
         before = self.count
+        completed = None
+        if before > 0:
+            completed = PityRound(
+                attempts=before,
+                pity_limit=self.pity_limit,
+                reached_pity=before >= self.pity_limit,
+                source=source,
+            )
+            self.rounds.append(completed)
         self.count = 0
         self.pity_reached = False
         self.history.append(
             HistoryEvent(
                 type="reset",
-                source="manual",
+                source=source,
                 before=before,
                 after=0,
             )
         )
+        return completed
