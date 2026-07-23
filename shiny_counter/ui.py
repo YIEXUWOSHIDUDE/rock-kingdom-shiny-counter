@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 
 from .capture import CaptureError, Win32Capture, WindowInfo, list_visible_windows
 from .hotkeys import GlobalHotkeyThread
-from .model import HistoryEvent
+from .model import HistoryEvent, PityRound
 from .storage import AppData, DataStore
 from .worker import RecognitionWorker
 
@@ -179,11 +179,45 @@ class SettingsDialog(QDialog):
 
 
 class HistoryDialog(QDialog):
-    def __init__(self, history: list[HistoryEvent], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        history: list[HistoryEvent],
+        rounds: list[PityRound],
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("计数历史")
-        self.resize(760, 440)
+        self.resize(820, 620)
         layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("保底轮次记录"))
+        round_table = QTableWidget(0, 6)
+        round_table.setHorizontalHeaderLabels(
+            ["轮次", "结束时间", "本轮次数", "保底上限", "结果", "来源"]
+        )
+        round_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        round_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        source_names = {
+            "manual": "手动重置",
+            "shiny_icon": "异色图标",
+        }
+        for round_number, completed in reversed(list(enumerate(rounds, start=1))):
+            row = round_table.rowCount()
+            round_table.insertRow(row)
+            values = [
+                str(round_number),
+                completed.at.replace("T", " ")[:19],
+                str(completed.attempts),
+                str(completed.pity_limit),
+                "达到保底" if completed.reached_pity else "提前结束",
+                source_names.get(completed.source, completed.source),
+            ]
+            for column, value in enumerate(values):
+                round_table.setItem(row, column, QTableWidgetItem(value))
+        round_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(round_table)
+
+        layout.addWidget(QLabel("详细计数事件"))
         table = QTableWidget(0, 6)
         table.setHorizontalHeaderLabels(["时间", "事件", "来源", "变更前", "变更后", "置信度"])
         table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -268,6 +302,10 @@ class OverlayWindow(QWidget):
         self.target_label = QLabel()
         self.target_label.setObjectName("target")
         header.addWidget(self.target_label, 1)
+        self.position_lock_button = QPushButton()
+        self.position_lock_button.setFixedWidth(72)
+        self.position_lock_button.clicked.connect(self._toggle_position_lock)
+        header.addWidget(self.position_lock_button)
         close_button = QPushButton("×")
         close_button.setFixedSize(28, 24)
         close_button.clicked.connect(self.close)
@@ -312,6 +350,7 @@ class OverlayWindow(QWidget):
         self.status_label.setObjectName("status")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         outer.addWidget(self.status_label)
+        self._refresh_position_lock_button()
 
     def _restore_window_state(self) -> None:
         self.setWindowOpacity(self.data.settings.opacity)
@@ -332,11 +371,18 @@ class OverlayWindow(QWidget):
                 pass
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and not self.data.settings.position_locked
+        ):
             self.drag_offset = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self.drag_offset is not None and event.buttons() & Qt.MouseButton.LeftButton:
+        if (
+            not self.data.settings.position_locked
+            and self.drag_offset is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
             self.move(event.globalPosition().toPoint() - self.drag_offset)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -344,6 +390,24 @@ class OverlayWindow(QWidget):
             self.drag_offset = None
             self.data.settings.overlay_position = (self.x(), self.y())
             self._save()
+
+    def _refresh_position_lock_button(self) -> None:
+        locked = self.data.settings.position_locked
+        self.position_lock_button.setText("解锁位置" if locked else "锁定位置")
+        self.position_lock_button.setToolTip(
+            "当前位置已锁定，点击后允许拖动"
+            if locked
+            else "当前可以拖动，点击后固定位置"
+        )
+
+    def _toggle_position_lock(self) -> None:
+        locked = not self.data.settings.position_locked
+        self.data.settings.position_locked = locked
+        if locked:
+            self.drag_offset = None
+        self._refresh_position_lock_button()
+        self._save()
+        self.status_label.setText("计数器位置已锁定" if locked else "位置已解锁，可以拖动计数器")
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.data.settings.overlay_position = (self.x(), self.y())
@@ -403,9 +467,13 @@ class OverlayWindow(QWidget):
             QMessageBox.StandardButton.No,
         )
         if answer == QMessageBox.StandardButton.Yes:
-            self.data.counter.reset()
+            completed = self.data.counter.reset(source="manual")
             self._save()
             self._refresh_display()
+            if completed is not None:
+                self.status_label.setText(
+                    f"第 {len(self.data.counter.rounds)} 轮已记录：{completed.attempts} 次"
+                )
 
     def _toggle_pause(self) -> None:
         self.paused = not self.paused
@@ -531,7 +599,11 @@ class OverlayWindow(QWidget):
             self._restart_recognition()
 
     def _open_history(self) -> None:
-        HistoryDialog(self.data.counter.history, self).exec()
+        HistoryDialog(
+            self.data.counter.history,
+            self.data.counter.rounds,
+            self,
+        ).exec()
 
     def _export_data(self) -> None:
         default_name = f"异色计数备份-{datetime.now():%Y%m%d-%H%M%S}.zip"
@@ -566,6 +638,7 @@ class OverlayWindow(QWidget):
             QMessageBox.critical(self, "导入失败", str(error))
             return
         self.setWindowOpacity(self.data.settings.opacity)
+        self._refresh_position_lock_button()
         self._refresh_display()
         self._start_hotkeys()
         self._restart_recognition()

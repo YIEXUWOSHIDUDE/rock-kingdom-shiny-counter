@@ -43,6 +43,22 @@ class CounterStateTests(unittest.TestCase):
 
         self.assertFalse(state.undo())
 
+    def test_manual_reset_records_the_completed_round_attempt_count(self) -> None:
+        state = CounterState(target_name="测试宠物", pity_limit=3)
+        state.increment(source="auto", score=0.95)
+        state.increment(source="auto", score=0.96)
+
+        completed = state.reset(source="manual")
+
+        self.assertIsNotNone(completed)
+        assert completed is not None
+        self.assertEqual(completed.attempts, 2)
+        self.assertEqual(completed.pity_limit, 3)
+        self.assertFalse(completed.reached_pity)
+        self.assertEqual(completed.source, "manual")
+        self.assertEqual(state.rounds, [completed])
+        self.assertEqual(state.count, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

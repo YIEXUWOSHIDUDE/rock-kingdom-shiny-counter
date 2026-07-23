@@ -21,12 +21,29 @@ class HistoryEvent:
 
 
 @dataclass(slots=True)
+class PityRound:
+    attempts: int
+    pity_limit: int
+    reached_pity: bool
+    source: str
+    at: str = field(default_factory=utc_now)
+    id: str = field(default_factory=lambda: str(uuid4()))
+
+    def __post_init__(self) -> None:
+        if self.attempts < 1:
+            raise ValueError("round attempts must be positive")
+        if self.pity_limit < 1:
+            raise ValueError("round pity_limit must be positive")
+
+
+@dataclass(slots=True)
 class CounterState:
     target_name: str = "异色宠物"
     pity_limit: int = 80
     count: int = 0
     pity_reached: bool = False
     history: list[HistoryEvent] = field(default_factory=list)
+    rounds: list[PityRound] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.pity_limit < 1:
@@ -80,15 +97,25 @@ class CounterState:
         )
         return True
 
-    def reset(self) -> None:
+    def reset(self, *, source: str = "manual") -> PityRound | None:
         before = self.count
+        completed = None
+        if before > 0:
+            completed = PityRound(
+                attempts=before,
+                pity_limit=self.pity_limit,
+                reached_pity=before >= self.pity_limit,
+                source=source,
+            )
+            self.rounds.append(completed)
         self.count = 0
         self.pity_reached = False
         self.history.append(
             HistoryEvent(
                 type="reset",
-                source="manual",
+                source=source,
                 before=before,
                 after=0,
             )
         )
+        return completed

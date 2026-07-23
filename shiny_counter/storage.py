@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .model import CounterState, HistoryEvent
+from .model import CounterState, HistoryEvent, PityRound
 
 
 DATA_VERSION = 1
@@ -33,6 +33,7 @@ class AppSettings:
     ocr_exit_frames: int = 2
     opacity: float = 0.92
     click_through: bool = False
+    position_locked: bool = True
     overlay_position: tuple[int, int] | None = None
     hotkeys: dict[str, str] = field(
         default_factory=lambda: {
@@ -91,12 +92,14 @@ class AppData:
             raise ValueError("counter and settings objects are required")
 
         events = [HistoryEvent(**event) for event in counter_raw.get("history", [])]
+        rounds = [PityRound(**round_data) for round_data in counter_raw.get("rounds", [])]
         counter = CounterState(
             target_name=str(counter_raw.get("target_name", "异色宠物")),
             pity_limit=int(counter_raw.get("pity_limit", 80)),
             count=int(counter_raw.get("count", 0)),
             pity_reached=bool(counter_raw.get("pity_reached", False)),
             history=events,
+            rounds=rounds,
         )
 
         client_size_raw = settings_raw.get("client_size")
@@ -111,6 +114,7 @@ class AppData:
             ocr_exit_frames=int(settings_raw.get("ocr_exit_frames", 2)),
             opacity=float(settings_raw.get("opacity", 0.92)),
             click_through=bool(settings_raw.get("click_through", False)),
+            position_locked=bool(settings_raw.get("position_locked", True)),
             overlay_position=tuple(map(int, position_raw)) if position_raw is not None else None,
             hotkeys=dict(settings_raw.get("hotkeys", AppSettings().hotkeys)),
         )
