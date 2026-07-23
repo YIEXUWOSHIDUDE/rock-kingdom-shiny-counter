@@ -93,6 +93,24 @@ class AppData:
 
         events = [HistoryEvent(**event) for event in counter_raw.get("history", [])]
         rounds = [PityRound(**round_data) for round_data in counter_raw.get("rounds", [])]
+        reset_events = [
+            event
+            for event in events
+            if event.type == "reset" and event.before > 0
+        ]
+        missing_round_count = max(0, len(reset_events) - len(rounds))
+        legacy_rounds = [
+            PityRound(
+                attempts=event.before,
+                pity_limit=None,
+                reached_pity=None,
+                source=event.source,
+                at=event.at,
+                id=f"legacy-{event.id}",
+            )
+            for event in reset_events[:missing_round_count]
+        ]
+        rounds = legacy_rounds + rounds
         counter = CounterState(
             target_name=str(counter_raw.get("target_name", "异色宠物")),
             pity_limit=int(counter_raw.get("pity_limit", 80)),

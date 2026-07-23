@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 import zipfile
@@ -56,6 +57,32 @@ class DataStoreTests(unittest.TestCase):
             self.assertEqual(restored[0].pity_limit, 2)
             self.assertTrue(restored[0].reached_pity)
             self.assertEqual(restored[0].source, "manual")
+
+    def test_old_reset_history_is_backfilled_as_an_explicit_round(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+            for _ in range(61):
+                data.counter.increment(source="auto", score=0.96)
+            data.counter.reset(source="manual")
+            legacy_payload = data.to_dict()
+            legacy_payload["counter"].pop("rounds")
+            store.root.mkdir(parents=True, exist_ok=True)
+            store.path.write_text(
+                json.dumps(legacy_payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            restored_data = store.load()
+            restored = restored_data.counter.rounds
+
+            self.assertEqual(len(restored), 1)
+            self.assertEqual(restored[0].attempts, 61)
+            self.assertIsNone(restored[0].pity_limit)
+            self.assertEqual(restored[0].summary, "61次出（旧记录）")
+
+            store.save(restored_data)
+            self.assertEqual(len(store.load().counter.rounds), 1)
 
     def test_ocr_settings_survive_a_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

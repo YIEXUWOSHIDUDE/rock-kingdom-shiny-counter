@@ -23,8 +23,8 @@ class HistoryEvent:
 @dataclass(slots=True)
 class PityRound:
     attempts: int
-    pity_limit: int
-    reached_pity: bool
+    pity_limit: int | None
+    reached_pity: bool | None
     source: str
     at: str = field(default_factory=utc_now)
     id: str = field(default_factory=lambda: str(uuid4()))
@@ -32,11 +32,13 @@ class PityRound:
     def __post_init__(self) -> None:
         if self.attempts < 1:
             raise ValueError("round attempts must be positive")
-        if self.pity_limit < 1:
+        if self.pity_limit is not None and self.pity_limit < 1:
             raise ValueError("round pity_limit must be positive")
 
     @property
     def summary(self) -> str:
+        if self.pity_limit is None or self.reached_pity is None:
+            return f"{self.attempts}次出（旧记录）"
         if self.attempts < self.pity_limit:
             early_by = self.pity_limit - self.attempts
             return f"{self.attempts}次出（{self.pity_limit}次保底，提前{early_by}次）"
