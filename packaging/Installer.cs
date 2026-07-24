@@ -31,6 +31,16 @@ internal static class Installer
         {
             try
             {
+                if (!testMode)
+                {
+                    CompatibilityReport compatibility =
+                        CompatibilityEvaluator.Evaluate(
+                            CompatibilityDetector.Detect(target));
+                    if (!compatibility.CanInstall)
+                        throw new InvalidOperationException(
+                            "当前电脑不满足最低要求：\r\n"
+                            + compatibility.ToDisplayText());
+                }
                 Install(target, !testMode, null);
                 return 0;
             }
@@ -52,8 +62,8 @@ internal static class Installer
         Action<string> report = status ?? (_ => { });
         string root = Path.GetPathRoot(target);
         DriveInfo drive = new DriveInfo(root);
-        if (drive.AvailableFreeSpace < 6L * 1024 * 1024 * 1024)
-            throw new IOException("安装盘可用空间不足。请至少再腾出 6 GB；连同安装包本身建议预留 8 GB。 ");
+        if (drive.AvailableFreeSpace < 8L * 1024 * 1024 * 1024)
+            throw new IOException("安装盘可用空间不足。请至少预留 8 GB。");
 
         string temporaryRoot = Path.Combine(Path.GetTempPath(), "RKSC-Install-" + Guid.NewGuid().ToString("N"));
         string package = Path.Combine(temporaryRoot, "payload.zip");
@@ -207,31 +217,110 @@ internal static class Installer
         private readonly Label status;
         private readonly ProgressBar progress;
         private readonly Button install;
+        private readonly Button recheck;
         private readonly CheckBox launch;
+        private readonly ListView compatibility;
+        private readonly Label compatibilitySummary;
+        private CompatibilityReport compatibilityReport;
 
         internal InstallerForm(string targetPath)
         {
             target = targetPath;
             Text = ProductName + " 安装程序 v" + Version;
-            ClientSize = new Size(570, 285);
+            ClientSize = new Size(650, 510);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Microsoft YaHei UI", 10F);
 
-            Label title = new Label { Left = 26, Top = 24, Width = 520, Height = 32, Text = ProductName + "  v" + Version, Font = new Font(Font.FontFamily, 17F, FontStyle.Bold) };
-            Label requirements = new Label { Left = 28, Top = 72, Width = 510, Height = 70, Text = "最低要求：Windows 10/11 x64、NVIDIA RTX 20/30/40/50、\n驱动 580.88 或更高、4 GB 显存、8 GB 可用磁盘空间。\n本版本只使用 GPU，不会降级到 CPU。" };
-            status = new Label { Left = 28, Top = 155, Width = 510, Height = 26, Text = "安装位置：" + target };
-            progress = new ProgressBar { Left = 28, Top = 188, Width = 510, Height = 20, Style = ProgressBarStyle.Blocks };
-            launch = new CheckBox { Left = 28, Top = 226, Width = 260, Text = "安装完成后启动", Checked = true };
-            install = new Button { Left = 403, Top = 220, Width = 135, Height = 36, Text = "安装" };
+            Label title = new Label { Left = 26, Top = 20, Width = 590, Height = 34, Text = ProductName + "  v" + Version, Font = new Font(Font.FontFamily, 17F, FontStyle.Bold) };
+            Label requirements = new Label { Left = 28, Top = 62, Width = 590, Height = 60, Text = "最低要求：Windows 10 22H2 / Windows 11 x64、NVIDIA RTX 20/30/40/50、\n驱动 580.88 或更高、4 GB 显存、8 GB 可用磁盘空间；只使用 GPU，不降级到 CPU。" };
+            Label compatibilityTitle = new Label { Left = 28, Top = 130, Width = 590, Height = 24, Text = "安装前兼容性检测", Font = new Font(Font.FontFamily, 10F, FontStyle.Bold) };
+            compatibility = new ListView { Left = 28, Top = 158, Width = 590, Height = 180, View = View.List, HeaderStyle = ColumnHeaderStyle.None, MultiSelect = false, HideSelection = false };
+            compatibility.Items.Add("正在检测系统和 NVIDIA GPU……");
+            compatibilitySummary = new Label { Left = 28, Top = 346, Width = 590, Height = 34, Text = "请稍候……", Font = new Font(Font.FontFamily, 9F, FontStyle.Bold) };
+            status = new Label { Left = 28, Top = 388, Width = 590, Height = 26, Text = "安装位置：" + target };
+            progress = new ProgressBar { Left = 28, Top = 418, Width = 590, Height = 20, Style = ProgressBarStyle.Marquee };
+            launch = new CheckBox { Left = 28, Top = 461, Width = 260, Text = "安装完成后启动", Checked = true };
+            recheck = new Button { Left = 333, Top = 454, Width = 135, Height = 36, Text = "重新检测", Enabled = false };
+            install = new Button { Left = 483, Top = 454, Width = 135, Height = 36, Text = "安装", Enabled = false };
+            recheck.Click += async (sender, args) => await CheckCompatibilityAsync();
             install.Click += BeginInstall;
-            Controls.AddRange(new Control[] { title, requirements, status, progress, launch, install });
+            Shown += async (sender, args) => await CheckCompatibilityAsync();
+            Controls.AddRange(new Control[] { title, requirements, compatibilityTitle, compatibility, compatibilitySummary, status, progress, launch, recheck, install });
+        }
+
+        private async Task CheckCompatibilityAsync()
+        {
+            install.Enabled = false;
+            recheck.Enabled = false;
+            progress.Style = ProgressBarStyle.Marquee;
+            compatibility.Items.Clear();
+            compatibility.Items.Add("正在检测 Windows、磁盘和 NVIDIA GPU……");
+            compatibilitySummary.ForeColor = SystemColors.ControlText;
+            compatibilitySummary.Text = "请稍候……";
+            try
+            {
+                compatibilityReport = await Task.Run(() =>
+                    CompatibilityEvaluator.Evaluate(
+                        CompatibilityDetector.Detect(target)));
+                compatibility.Items.Clear();
+                foreach (CompatibilityCheck check in compatibilityReport.Checks)
+                {
+                    string marker = check.Severity == CompatibilitySeverity.Pass
+                        ? "✓"
+                        : check.Severity == CompatibilitySeverity.Warning ? "⚠" : "✕";
+                    ListViewItem item = new ListViewItem(
+                        marker + "  " + check.Name + "：" + check.Detail);
+                    item.ForeColor = check.Severity == CompatibilitySeverity.Pass
+                        ? Color.DarkGreen
+                        : check.Severity == CompatibilitySeverity.Warning
+                            ? Color.DarkOrange
+                            : Color.Firebrick;
+                    compatibility.Items.Add(item);
+                }
+                compatibilitySummary.Text = compatibilityReport.CanInstall
+                    ? compatibilityReport.HasWarnings
+                        ? "存在黄色警告，可以继续安装；首次启动后请再次确认 CUDA 状态。"
+                        : "检测通过，可以安装。"
+                    : "存在红色不兼容项目，已停止安装。";
+                compatibilitySummary.ForeColor = !compatibilityReport.CanInstall
+                    ? Color.Firebrick
+                    : compatibilityReport.HasWarnings
+                        ? Color.DarkOrange
+                        : Color.DarkGreen;
+                install.Enabled = compatibilityReport.CanInstall;
+            }
+            catch (Exception error)
+            {
+                compatibilityReport = null;
+                compatibility.Items.Clear();
+                ListViewItem item = compatibility.Items.Add(
+                    "⚠ 无法完成兼容性检测：" + error.Message);
+                item.ForeColor = Color.DarkOrange;
+                compatibilitySummary.Text = "请点击“重新检测”。";
+                compatibilitySummary.ForeColor = Color.DarkOrange;
+            }
+            finally
+            {
+                progress.Style = ProgressBarStyle.Blocks;
+                recheck.Enabled = true;
+            }
         }
 
         private async void BeginInstall(object sender, EventArgs e)
         {
+            if (compatibilityReport == null || !compatibilityReport.CanInstall)
+            {
+                MessageBox.Show(
+                    "请先完成兼容性检测，并解决红色不兼容项目。",
+                    "暂时不能安装",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                return;
+            }
             install.Enabled = false;
+            recheck.Enabled = false;
             launch.Enabled = false;
             progress.Style = ProgressBarStyle.Marquee;
             try
@@ -250,6 +339,7 @@ internal static class Installer
                 progress.Style = ProgressBarStyle.Blocks;
                 status.Text = "安装失败";
                 install.Enabled = true;
+                recheck.Enabled = true;
                 launch.Enabled = true;
                 MessageBox.Show(error.Message, "安装失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
