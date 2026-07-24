@@ -12,7 +12,7 @@ using Microsoft.Win32;
 
 internal static class Installer
 {
-    internal const string Version = "0.4.0";
+    internal const string Version = "0.4.1";
     internal const string ProductName = "洛克王国异色保底计数器";
     private const string ProductKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RockKingdomShinyCounter";
     private static readonly byte[] FooterMagic = Encoding.ASCII.GetBytes("RKSCZIP1");
