@@ -13,6 +13,19 @@ from .model import CounterState, HistoryEvent, PityRound
 
 
 DATA_VERSION = 1
+DEFAULT_DISABLE_CLICK_THROUGH_HOTKEY = "Ctrl+Alt+T"
+
+
+def normalize_hotkeys(raw: Any) -> dict[str, str]:
+    if not isinstance(raw, dict):
+        return {"disable_click_through": DEFAULT_DISABLE_CLICK_THROUGH_HOTKEY}
+    if "disable_click_through" in raw:
+        shortcut = str(raw["disable_click_through"])
+    elif "toggle_click_through" in raw:
+        shortcut = str(raw["toggle_click_through"])
+    else:
+        shortcut = DEFAULT_DISABLE_CLICK_THROUGH_HOTKEY
+    return {"disable_click_through": shortcut}
 
 
 def default_data_dir() -> Path:
@@ -35,14 +48,20 @@ class AppSettings:
     click_through: bool = False
     position_locked: bool = True
     overlay_position: tuple[int, int] | None = None
+    hotkeys_enabled: bool = False
     hotkeys: dict[str, str] = field(
         default_factory=lambda: {
-            "toggle_click_through": "Ctrl+Alt+T",
-            "increment": "Ctrl+Alt+Up",
-            "undo": "Ctrl+Alt+Down",
-            "pause": "Ctrl+Alt+P",
+            "disable_click_through": DEFAULT_DISABLE_CLICK_THROUGH_HOTKEY,
         }
     )
+
+    def active_hotkeys(self) -> dict[str, str]:
+        if not self.hotkeys_enabled:
+            return {}
+        shortcut = self.hotkeys.get("disable_click_through", "").strip()
+        if not shortcut:
+            return {}
+        return {"disable_click_through": shortcut}
 
     def validate(self) -> None:
         if not 0.30 <= self.opacity <= 1:
@@ -134,7 +153,8 @@ class AppData:
             click_through=bool(settings_raw.get("click_through", False)),
             position_locked=bool(settings_raw.get("position_locked", True)),
             overlay_position=tuple(map(int, position_raw)) if position_raw is not None else None,
-            hotkeys=dict(settings_raw.get("hotkeys", AppSettings().hotkeys)),
+            hotkeys_enabled=bool(settings_raw.get("hotkeys_enabled", False)),
+            hotkeys=normalize_hotkeys(settings_raw.get("hotkeys")),
         )
         data = cls(counter=counter, settings=settings, version=version)
         data.validate()
