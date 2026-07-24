@@ -46,6 +46,7 @@ def parse_hotkey(text: str) -> tuple[int, int]:
 
 class GlobalHotkeyThread(QThread):
     activated = Signal(str)
+    registration_succeeded = Signal(str)
     registration_error = Signal(str)
 
     def __init__(self, bindings: dict[str, str]) -> None:
@@ -67,6 +68,7 @@ class GlobalHotkeyThread(QThread):
                 self.registration_error.emit(f"快捷键被占用：{text}（{action}）")
                 continue
             registered[identifier] = action
+            self.registration_succeeded.emit(action)
 
         message = ctypes.wintypes.MSG()
         try:

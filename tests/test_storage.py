@@ -4,10 +4,43 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from shiny_counter.storage import DataCorruptError, DataStore
+from shiny_counter.storage import AppSettings, DataCorruptError, DataStore
 
 
 class DataStoreTests(unittest.TestCase):
+    def test_global_hotkeys_are_disabled_by_default(self) -> None:
+        settings = AppSettings()
+
+        self.assertFalse(settings.hotkeys_enabled)
+        self.assertEqual(settings.active_hotkeys(), {})
+
+    def test_legacy_hotkeys_are_disabled_and_reduced_to_click_through_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+            payload = data.to_dict()
+            payload["settings"]["hotkeys"] = {
+                "toggle_click_through": "Ctrl+Alt+T",
+                "increment": "Ctrl+Alt+Up",
+                "undo": "Ctrl+Alt+Down",
+                "pause": "Ctrl+Alt+P",
+            }
+            payload["settings"].pop("hotkeys_enabled", None)
+            store.root.mkdir(parents=True, exist_ok=True)
+            store.path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            restored = store.load().settings
+
+            self.assertFalse(restored.hotkeys_enabled)
+            self.assertEqual(
+                restored.hotkeys,
+                {"disable_click_through": "Ctrl+Alt+T"},
+            )
+            self.assertEqual(restored.active_hotkeys(), {})
+
     def test_overlay_position_is_locked_by_default_and_unlock_choice_survives_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DataStore(Path(directory))

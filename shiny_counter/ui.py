@@ -5,10 +5,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QCloseEvent, QMouseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -21,11 +22,14 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QSpinBox,
+    QStyle,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -42,36 +46,65 @@ from .worker import RecognitionWorker
 APP_STYLE = """
 QWidget#overlay {
     background: #172033;
-    color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 12px;
 }
-QLabel { color: #ffffff; }
-QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
-QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
-QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
-QPushButton {
+QWidget#overlay > QLabel { color: #ffffff; }
+QWidget#overlay > QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
+QWidget#overlay > QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
+QWidget#overlay > QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
+QWidget#overlay > QPushButton {
     background: #293852;
     color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 6px;
     padding: 5px 8px;
 }
-QPushButton:hover { background: #354a6d; }
-QProgressBar {
+QWidget#overlay > QPushButton:hover { background: #354a6d; }
+QWidget#overlay > QProgressBar {
     border: 1px solid #52617d;
     border-radius: 5px;
     background: #101728;
     text-align: center;
     color: white;
 }
-QProgressBar::chunk { background: #3aa7dc; border-radius: 4px; }
+QWidget#overlay > QProgressBar::chunk { background: #3aa7dc; border-radius: 4px; }
+"""
+
+DIALOG_STYLE = """
+QDialog {
+    background: #f5f7fb;
+    color: #172033;
+}
+QDialog QLabel, QDialog QGroupBox {
+    color: #172033;
+}
+QDialog QLineEdit,
+QDialog QSpinBox,
+QDialog QDoubleSpinBox,
+QDialog QListWidget,
+QDialog QTableWidget,
+QDialog QPlainTextEdit {
+    background: #ffffff;
+    color: #172033;
+}
+QDialog QPushButton {
+    background: #e7edf6;
+    color: #172033;
+    border: 1px solid #aab7ca;
+    border-radius: 5px;
+    padding: 5px 10px;
+}
+QDialog QPushButton:hover {
+    background: #d9e3f1;
+}
 """
 
 
 class WindowPickerDialog(QDialog):
     def __init__(self, windows: list[WindowInfo], parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("选择洛克王国窗口")
         self.resize(560, 360)
         layout = QVBoxLayout(self)
@@ -96,9 +129,21 @@ class WindowPickerDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, data: AppData, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        data: AppData,
+        parent: QWidget | None = None,
+        *,
+        system_tray_available: bool | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.data = data
+        self.system_tray_available = (
+            QSystemTrayIcon.isSystemTrayAvailable()
+            if system_tray_available is None
+            else system_tray_available
+        )
         self.setWindowTitle("计数器设置")
         self.resize(540, 580)
         layout = QVBoxLayout(self)
@@ -133,25 +178,44 @@ class SettingsDialog(QDialog):
         form.addRow("悬浮窗透明度", self.opacity)
         layout.addLayout(form)
 
-        hotkey_group = QGroupBox("全局快捷键")
-        hotkey_form = QFormLayout(hotkey_group)
-        self.hotkeys: dict[str, QLineEdit] = {}
-        labels = {
-            "toggle_click_through": "切换点击穿透",
-            "increment": "手动补一",
-            "undo": "撤销",
-            "pause": "暂停或继续",
-        }
-        for action, label in labels.items():
-            edit = QLineEdit(data.settings.hotkeys.get(action, ""))
-            self.hotkeys[action] = edit
-            hotkey_form.addRow(label, edit)
-        layout.addWidget(hotkey_group)
+        advanced_group = QGroupBox("高级设置")
+        advanced_layout = QVBoxLayout(advanced_group)
+        self.click_through = QCheckBox("启用点击穿透")
+        self.click_through.setChecked(data.settings.click_through)
+        advanced_layout.addWidget(self.click_through)
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self._validate_and_accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.hotkeys_enabled = QCheckBox("启用全局快捷键")
+        self.hotkeys_enabled.setChecked(data.settings.hotkeys_enabled)
+        advanced_layout.addWidget(self.hotkeys_enabled)
+        hotkey_form = QFormLayout()
+        self.disable_click_through_hotkey = QLineEdit(
+            data.settings.hotkeys.get("disable_click_through", "")
+        )
+        self.disable_click_through_hotkey.setPlaceholderText("例如：Ctrl+Alt+T")
+        self.disable_click_through_hotkey.setEnabled(
+            data.settings.hotkeys_enabled
+        )
+        self.hotkeys_enabled.toggled.connect(
+            self.disable_click_through_hotkey.setEnabled
+        )
+        hotkey_form.addRow("关闭点击穿透", self.disable_click_through_hotkey)
+        advanced_layout.addLayout(hotkey_form)
+        advanced_layout.addWidget(
+            QLabel("一般用户无需开启；补一、撤销和暂停请直接使用界面按钮。")
+        )
+        self.advanced_status = QLabel("")
+        self.advanced_status.setStyleSheet("color: #b42318; font-weight: 600;")
+        self.advanced_status.setWordWrap(True)
+        advanced_layout.addWidget(self.advanced_status)
+        layout.addWidget(advanced_group)
+
+        self.button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.button_box.accepted.connect(self._validate_and_accept)
+        self.button_box.rejected.connect(self.reject)
+        layout.addWidget(self.button_box)
 
     def _validate_and_accept(self) -> None:
         if not self.target.text().strip():
@@ -161,6 +225,19 @@ class SettingsDialog(QDialog):
         if not any(keyword.strip() for keyword in keywords):
             QMessageBox.warning(self, "设置无效", "至少填写一个只在结算画面出现的 OCR 关键词。")
             return
+        if (
+            self.click_through.isChecked()
+            and not self.system_tray_available
+            and (
+                not self.hotkeys_enabled.isChecked()
+                or not self.disable_click_through_hotkey.text().strip()
+            )
+        ):
+            self.advanced_status.setText(
+                "当前系统托盘不可用。开启点击穿透前，必须启用并设置“关闭穿透”快捷键。"
+            )
+            return
+        self.advanced_status.clear()
         self.accept()
 
     def apply(self) -> None:
@@ -175,7 +252,11 @@ class SettingsDialog(QDialog):
         self.data.settings.ocr_min_confidence = self.ocr_confidence.value()
         self.data.settings.ocr_interval_ms = self.ocr_interval.value()
         self.data.settings.opacity = self.opacity.value()
-        self.data.settings.hotkeys = {action: edit.text().strip() for action, edit in self.hotkeys.items()}
+        self.data.settings.click_through = self.click_through.isChecked()
+        self.data.settings.hotkeys_enabled = self.hotkeys_enabled.isChecked()
+        self.data.settings.hotkeys = {
+            "disable_click_through": self.disable_click_through_hotkey.text().strip(),
+        }
 
 
 class HistoryDialog(QDialog):
@@ -186,6 +267,7 @@ class HistoryDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("计数历史")
         self.resize(820, 620)
         layout = QVBoxLayout(self)
@@ -249,6 +331,7 @@ class HistoryDialog(QDialog):
 class OCRTextDialog(QDialog):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("最近一次横幅 OCR 结果")
         self.resize(640, 420)
         layout = QVBoxLayout(self)
@@ -265,12 +348,24 @@ class OCRTextDialog(QDialog):
 
 
 class OverlayWindow(QWidget):
-    def __init__(self, store: DataStore) -> None:
+    def __init__(
+        self,
+        store: DataStore,
+        *,
+        system_tray_available: bool | None = None,
+    ) -> None:
         super().__init__()
         self.store = store
         self.data = store.load()
+        self.system_tray_available = (
+            QSystemTrayIcon.isSystemTrayAvailable()
+            if system_tray_available is None
+            else system_tray_available
+        )
+        self.tray_icon: QSystemTrayIcon | None = None
         self.recognition_worker: RecognitionWorker | None = None
         self.hotkey_worker: GlobalHotkeyThread | None = None
+        self.pending_click_through = False
         self.paused = False
         self.drag_offset: QPoint | None = None
         self.last_ocr_text = ""
@@ -286,6 +381,7 @@ class OverlayWindow(QWidget):
         self.setStyleSheet(APP_STYLE)
         self.setFixedWidth(350)
         self._build_ui()
+        self._setup_system_tray()
         self._restore_window_state()
         self._refresh_display()
         self._start_hotkeys()
@@ -350,6 +446,42 @@ class OverlayWindow(QWidget):
         outer.addWidget(self.status_label)
         self._refresh_position_lock_button()
 
+    def _setup_system_tray(self) -> None:
+        self.tray_menu = QMenu()
+        show_action = QAction("显示计数器", self)
+        show_action.triggered.connect(self._restore_from_tray)
+        self.tray_menu.addAction(show_action)
+        self.tray_restore_action = QAction("关闭点击穿透", self)
+        self.tray_restore_action.triggered.connect(self._restore_from_tray)
+        self.tray_menu.addAction(self.tray_restore_action)
+        self.tray_menu.addSeparator()
+        quit_action = QAction("退出", self)
+        quit_action.triggered.connect(QApplication.quit)
+        self.tray_menu.addAction(quit_action)
+
+        if not self.system_tray_available:
+            return
+        icon = self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        self.tray_icon.setToolTip("洛克王国异色保底计数")
+        self.tray_icon.setContextMenu(self.tray_menu)
+        self.tray_icon.activated.connect(self._tray_activated)
+        self.tray_icon.show()
+
+    def _tray_activated(
+        self,
+        reason: QSystemTrayIcon.ActivationReason,
+    ) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.set_click_through(False)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.status_label.setText("已通过系统托盘恢复点击")
+
     def _restore_window_state(self) -> None:
         self.setWindowOpacity(self.data.settings.opacity)
         if self.data.settings.overlay_position is not None:
@@ -412,6 +544,8 @@ class OverlayWindow(QWidget):
         self._save()
         self._stop_recognition()
         self._stop_hotkeys()
+        if self.tray_icon is not None:
+            self.tray_icon.hide()
         event.accept()
 
     def _save(self) -> None:
@@ -488,11 +622,21 @@ class OverlayWindow(QWidget):
         if persist:
             self._save()
         if enabled:
-            hotkey = self.data.settings.hotkeys.get("toggle_click_through", "")
-            self.status_label.setText(f"点击穿透已开启，按 {hotkey} 关闭")
+            hotkey = self.data.settings.active_hotkeys().get(
+                "disable_click_through",
+                "",
+            )
+            if hotkey:
+                self.status_label.setText(
+                    f"点击穿透已开启，可按 {hotkey} 或通过系统托盘关闭"
+                )
+            else:
+                self.status_label.setText(
+                    "点击穿透已开启，可通过系统托盘关闭"
+                )
 
-    def _toggle_click_through(self) -> None:
-        self._set_click_through(not self.data.settings.click_through)
+    def set_click_through(self, enabled: bool, *, persist: bool = True) -> None:
+        self._set_click_through(enabled, persist=persist)
 
     def _recognition_status(self, message: str, score: float) -> None:
         if score >= 0:
@@ -531,26 +675,40 @@ class OverlayWindow(QWidget):
 
     def _start_hotkeys(self) -> None:
         self._stop_hotkeys()
-        worker = GlobalHotkeyThread(self.data.settings.hotkeys)
+        bindings = self.data.settings.active_hotkeys()
+        if not bindings:
+            return
+        worker = GlobalHotkeyThread(bindings)
         worker.activated.connect(self._handle_hotkey)
-        worker.registration_error.connect(self._hotkey_error)
+        worker.registration_succeeded.connect(
+            self.hotkey_registration_succeeded
+        )
+        worker.registration_error.connect(self.hotkey_registration_failed)
         self.hotkey_worker = worker
         worker.start()
 
     def _handle_hotkey(self, action: str) -> None:
         handlers = {
-            "toggle_click_through": self._toggle_click_through,
-            "increment": self._manual_increment,
-            "undo": self._undo,
-            "pause": self._toggle_pause,
+            "disable_click_through": lambda: self.set_click_through(False),
         }
         handler = handlers.get(action)
         if handler is not None:
             handler()
 
-    def _hotkey_error(self, message: str) -> None:
+    def hotkey_registration_failed(self, message: str) -> None:
+        if self.pending_click_through:
+            self.pending_click_through = False
+            self.set_click_through(False)
+            message = f"未开启点击穿透：{message}"
         self.status_label.setText(message)
-        QMessageBox.warning(self, "全局快捷键不可用", f"{message}\n请在设置中更换快捷键。")
+
+    def hotkey_registration_succeeded(self, action: str) -> None:
+        if (
+            action == "disable_click_through"
+            and self.pending_click_through
+        ):
+            self.pending_click_through = False
+            self.set_click_through(True)
 
     def _select_window(self) -> None:
         windows = [window for window in list_visible_windows() if window.title != self.windowTitle()]
@@ -587,14 +745,32 @@ class OverlayWindow(QWidget):
         OCRTextDialog(self.last_ocr_text, self).exec()
 
     def _open_settings(self) -> None:
-        dialog = SettingsDialog(self.data, self)
+        dialog = SettingsDialog(
+            self.data,
+            self,
+            system_tray_available=self.system_tray_available,
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            dialog.apply()
-            self.setWindowOpacity(self.data.settings.opacity)
-            self._save()
-            self._refresh_display()
-            self._start_hotkeys()
-            self._restart_recognition()
+            self.apply_settings(dialog)
+
+    def apply_settings(self, dialog: SettingsDialog) -> None:
+        dialog.apply()
+        click_through_requested = self.data.settings.click_through
+        self.setWindowOpacity(self.data.settings.opacity)
+        self._save()
+        self._refresh_display()
+        if click_through_requested and not self.system_tray_available:
+            self.set_click_through(False)
+            self.pending_click_through = True
+            self.status_label.setText(
+                "正在注册“关闭穿透”快捷键，成功后才会开启点击穿透"
+            )
+        else:
+            self.pending_click_through = False
+        self._restart_recognition()
+        self._start_hotkeys()
+        if not self.pending_click_through:
+            self.set_click_through(click_through_requested)
 
     def _open_history(self) -> None:
         HistoryDialog(
@@ -636,6 +812,7 @@ class OverlayWindow(QWidget):
             QMessageBox.critical(self, "导入失败", str(error))
             return
         self.setWindowOpacity(self.data.settings.opacity)
+        self.set_click_through(False)
         self._refresh_position_lock_button()
         self._refresh_display()
         self._start_hotkeys()
