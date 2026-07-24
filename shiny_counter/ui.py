@@ -42,36 +42,65 @@ from .worker import RecognitionWorker
 APP_STYLE = """
 QWidget#overlay {
     background: #172033;
-    color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 12px;
 }
-QLabel { color: #ffffff; }
-QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
-QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
-QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
-QPushButton {
+QWidget#overlay > QLabel { color: #ffffff; }
+QWidget#overlay > QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
+QWidget#overlay > QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
+QWidget#overlay > QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
+QWidget#overlay > QPushButton {
     background: #293852;
     color: #ffffff;
     border: 1px solid #52617d;
     border-radius: 6px;
     padding: 5px 8px;
 }
-QPushButton:hover { background: #354a6d; }
-QProgressBar {
+QWidget#overlay > QPushButton:hover { background: #354a6d; }
+QWidget#overlay > QProgressBar {
     border: 1px solid #52617d;
     border-radius: 5px;
     background: #101728;
     text-align: center;
     color: white;
 }
-QProgressBar::chunk { background: #3aa7dc; border-radius: 4px; }
+QWidget#overlay > QProgressBar::chunk { background: #3aa7dc; border-radius: 4px; }
+"""
+
+DIALOG_STYLE = """
+QDialog {
+    background: #f5f7fb;
+    color: #172033;
+}
+QDialog QLabel, QDialog QGroupBox {
+    color: #172033;
+}
+QDialog QLineEdit,
+QDialog QSpinBox,
+QDialog QDoubleSpinBox,
+QDialog QListWidget,
+QDialog QTableWidget,
+QDialog QPlainTextEdit {
+    background: #ffffff;
+    color: #172033;
+}
+QDialog QPushButton {
+    background: #e7edf6;
+    color: #172033;
+    border: 1px solid #aab7ca;
+    border-radius: 5px;
+    padding: 5px 10px;
+}
+QDialog QPushButton:hover {
+    background: #d9e3f1;
+}
 """
 
 
 class WindowPickerDialog(QDialog):
     def __init__(self, windows: list[WindowInfo], parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("选择洛克王国窗口")
         self.resize(560, 360)
         layout = QVBoxLayout(self)
@@ -98,6 +127,7 @@ class WindowPickerDialog(QDialog):
 class SettingsDialog(QDialog):
     def __init__(self, data: AppData, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.data = data
         self.setWindowTitle("计数器设置")
         self.resize(540, 580)
@@ -186,6 +216,7 @@ class HistoryDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("计数历史")
         self.resize(820, 620)
         layout = QVBoxLayout(self)
@@ -249,6 +280,7 @@ class HistoryDialog(QDialog):
 class OCRTextDialog(QDialog):
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
         self.setWindowTitle("最近一次横幅 OCR 结果")
         self.resize(640, 420)
         layout = QVBoxLayout(self)
