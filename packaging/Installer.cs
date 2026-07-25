@@ -2,9 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.IO.Compression;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -12,10 +10,9 @@ using Microsoft.Win32;
 
 internal static class Installer
 {
-    internal const string Version = "0.4.1";
+    internal static readonly string Version = ProductVersion.Current;
     internal const string ProductName = "洛克王国异色保底计数器";
     private const string ProductKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\RockKingdomShinyCounter";
-    private static readonly byte[] FooterMagic = Encoding.ASCII.GetBytes("RKSCZIP1");
 
     [STAThread]
     private static int Main(string[] args)
@@ -57,121 +54,89 @@ internal static class Installer
         return 0;
     }
 
-    internal static void Install(string target, bool createShellEntries, Action<string> status)
+    internal static string Install(string target, bool createShellEntries, Action<string> status)
     {
         Action<string> report = status ?? (_ => { });
         string root = Path.GetPathRoot(target);
         DriveInfo drive = new DriveInfo(root);
-        if (drive.AvailableFreeSpace < 8L * 1024 * 1024 * 1024)
-            throw new IOException("安装盘可用空间不足。请至少预留 8 GB。");
+        if (drive.AvailableFreeSpace < CompatibilityEvaluator.MinimumDiskBytes)
+            throw new IOException(
+                "安装盘可用空间不足。请至少预留 "
+                + CompatibilityEvaluator.MinimumDiskGigabytes
+                + " GB。");
 
-        string temporaryRoot = Path.Combine(Path.GetTempPath(), "RKSC-Install-" + Guid.NewGuid().ToString("N"));
-        string package = Path.Combine(temporaryRoot, "payload.zip");
         string staging = target + ".new-" + Guid.NewGuid().ToString("N");
-        Directory.CreateDirectory(temporaryRoot);
         try
         {
-            report("正在读取安装数据……");
-            CopyAppendedPayload(package);
-            report("正在解压 CUDA 13 与 OCR 文件……");
-            ZipFile.ExtractToDirectory(package, staging);
+            report("正在从安装包解压 CUDA 13 与 OCR 文件……");
+            AppendedPayload.Extract(
+                Process.GetCurrentProcess().MainModule.FileName,
+                staging);
             ValidateStaging(staging);
 
-            report("正在替换旧版本……");
-            if (Directory.Exists(target))
-                Directory.Delete(target, true);
-            Directory.Move(staging, target);
+            report("正在验证 CUDA 与 EasyOCR GPU 运行时……");
+            RuntimeProbeResult runtime = RuntimeProbeRunner.Run(
+                Path.Combine(staging, "RockKingdomShinyCounter.exe"),
+                staging,
+                180000);
+            if (!runtime.Success)
+                throw new InvalidOperationException(
+                    "GPU-only 运行时验证失败，安装已停止且现有版本未被替换。\r\n"
+                    + runtime.DisplayText);
 
+            report("正在安全替换旧版本……");
+            StagedInstall.Commit(staging, target, runtime);
+
+            string shellWarning = null;
             if (createShellEntries)
             {
-                report("正在创建快捷方式……");
-                CreateShellEntries(target);
-                RegisterUninstaller(target);
+                try
+                {
+                    report("正在创建快捷方式……");
+                    CreateShellEntries(target);
+                    RegisterUninstaller(target);
+                }
+                catch (Exception error)
+                {
+                    shellWarning = "主程序已安装，但创建快捷方式或卸载信息失败："
+                        + error.Message;
+                }
             }
-            report("安装完成");
+            report(shellWarning ?? "安装完成");
+            return shellWarning;
         }
         finally
         {
-            if (Directory.Exists(staging))
-                Directory.Delete(staging, true);
-            if (Directory.Exists(temporaryRoot))
-                Directory.Delete(temporaryRoot, true);
+            DeleteDirectoryBestEffort(staging);
         }
     }
 
-    private static void CopyAppendedPayload(string destination)
+    private static void DeleteDirectoryBestEffort(string path)
     {
-        string executable = Process.GetCurrentProcess().MainModule.FileName;
-        using (FileStream source = File.OpenRead(executable))
+        try
         {
-            if (source.Length < 16)
-                throw new InvalidDataException("安装包数据不完整。");
-            source.Seek(-16, SeekOrigin.End);
-            byte[] lengthBytes = new byte[8];
-            byte[] magic = new byte[8];
-            ReadExactly(source, lengthBytes);
-            ReadExactly(source, magic);
-            if (!magic.SequenceEqual(FooterMagic))
-                throw new InvalidDataException("安装包签名无效，请重新下载。");
-            long payloadLength = BitConverter.ToInt64(lengthBytes, 0);
-            long payloadOffset = source.Length - 16 - payloadLength;
-            if (payloadLength <= 0 || payloadOffset <= 0)
-                throw new InvalidDataException("安装包长度无效，请重新下载。");
-
-            source.Position = payloadOffset;
-            using (FileStream output = File.Create(destination))
-            {
-                byte[] buffer = new byte[1024 * 1024];
-                long remaining = payloadLength;
-                while (remaining > 0)
-                {
-                    int count = source.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
-                    if (count <= 0)
-                        throw new EndOfStreamException("安装包数据提前结束。");
-                    output.Write(buffer, 0, count);
-                    remaining -= count;
-                }
-            }
+            if (Directory.Exists(path))
+                Directory.Delete(path, true);
         }
-    }
-
-    private static void ReadExactly(Stream stream, byte[] buffer)
-    {
-        int offset = 0;
-        while (offset < buffer.Length)
+        catch (IOException)
         {
-            int count = stream.Read(buffer, offset, buffer.Length - offset);
-            if (count <= 0)
-                throw new EndOfStreamException();
-            offset += count;
+        }
+        catch (UnauthorizedAccessException)
+        {
         }
     }
 
     private static void ValidateStaging(string staging)
     {
-        RequireFile(Path.Combine(staging, "RockKingdomShinyCounter.exe"), null);
-        RequireFile(
-            Path.Combine(staging, "_internal", "ocr-models", "craft_mlt_25k.pth"),
-            "4a5efbfb48b4081100544e75e1e2b57f8de3d84f213004b14b85fd4b3748db17");
-        RequireFile(
-            Path.Combine(staging, "_internal", "ocr-models", "zh_sim_g2.pth"),
-            "cb678fdef09d651e7763ca551ad790dc89f0b2e3d2a640484330e338fb574c7a");
-        RequireFile(Path.Combine(staging, "Uninstall.exe"), null);
+        RequireFile(Path.Combine(staging, "RockKingdomShinyCounter.exe"));
+        RequireFile(Path.Combine(staging, "Uninstall.exe"));
+        PayloadManifestValidator.Validate(staging);
     }
 
-    private static void RequireFile(string path, string expectedHash)
+    private static void RequireFile(string path)
     {
         if (!File.Exists(path))
             throw new InvalidDataException("安装包缺少文件：" + Path.GetFileName(path));
-        if (expectedHash == null)
-            return;
-        using (SHA256 sha = SHA256.Create())
-        using (FileStream input = File.OpenRead(path))
-        {
-            string actual = BitConverter.ToString(sha.ComputeHash(input)).Replace("-", "").ToLowerInvariant();
-            if (actual != expectedHash)
-                throw new InvalidDataException("OCR 模型校验失败：" + Path.GetFileName(path));
-        }
     }
 
     private static void CreateShellEntries(string target)
@@ -234,7 +199,7 @@ internal static class Installer
             Font = new Font("Microsoft YaHei UI", 10F);
 
             Label title = new Label { Left = 26, Top = 20, Width = 590, Height = 34, Text = ProductName + "  v" + Version, Font = new Font(Font.FontFamily, 17F, FontStyle.Bold) };
-            Label requirements = new Label { Left = 28, Top = 62, Width = 590, Height = 60, Text = "最低要求：Windows 10 22H2 / Windows 11 x64、NVIDIA RTX 20/30/40/50、\n驱动 580.88 或更高、4 GB 显存、8 GB 可用磁盘空间；只使用 GPU，不降级到 CPU。" };
+            Label requirements = new Label { Left = 28, Top = 62, Width = 590, Height = 60, Text = "最低要求：Windows 10 22H2 / Windows 11 x64、NVIDIA RTX 20/30/40/50、\n驱动 580.88 或更高、4 GB 显存、" + CompatibilityEvaluator.MinimumDiskGigabytes + " GB 可用磁盘空间；只使用 GPU，不降级到 CPU。" };
             Label compatibilityTitle = new Label { Left = 28, Top = 130, Width = 590, Height = 24, Text = "安装前兼容性检测", Font = new Font(Font.FontFamily, 10F, FontStyle.Bold) };
             compatibility = new ListView { Left = 28, Top = 158, Width = 590, Height = 180, View = View.List, HeaderStyle = ColumnHeaderStyle.None, MultiSelect = false, HideSelection = false };
             compatibility.Items.Add("正在检测系统和 NVIDIA GPU……");
@@ -280,15 +245,15 @@ internal static class Installer
                     compatibility.Items.Add(item);
                 }
                 compatibilitySummary.Text = compatibilityReport.CanInstall
-                    ? compatibilityReport.HasWarnings
-                        ? "存在黄色警告，可以继续安装；首次启动后请再次确认 CUDA 状态。"
-                        : "检测通过，可以安装。"
-                    : "存在红色不兼容项目，已停止安装。";
-                compatibilitySummary.ForeColor = !compatibilityReport.CanInstall
-                    ? Color.Firebrick
-                    : compatibilityReport.HasWarnings
-                        ? Color.DarkOrange
-                        : Color.DarkGreen;
+                    ? "检测通过；安装时还会运行真实 CUDA 与 OCR 验证。"
+                    : compatibilityReport.HasFailures
+                        ? "存在红色不兼容项目，已停止安装。"
+                        : "GPU、驱动或计算能力无法确认；GPU-only 模式已停止安装。";
+                compatibilitySummary.ForeColor = compatibilityReport.CanInstall
+                    ? Color.DarkGreen
+                    : compatibilityReport.HasFailures
+                        ? Color.Firebrick
+                        : Color.DarkOrange;
                 install.Enabled = compatibilityReport.CanInstall;
             }
             catch (Exception error)
@@ -325,13 +290,21 @@ internal static class Installer
             progress.Style = ProgressBarStyle.Marquee;
             try
             {
-                await Task.Run(() => Install(target, true, message => BeginInvoke((Action)(() => status.Text = message))));
+                string warning = await Task.Run(() =>
+                    Install(
+                        target,
+                        true,
+                        message => BeginInvoke((Action)(() => status.Text = message))));
                 progress.Style = ProgressBarStyle.Blocks;
                 progress.Value = 100;
                 install.Text = "完成";
                 if (launch.Checked)
                     Process.Start(Path.Combine(target, "RockKingdomShinyCounter.exe"));
-                MessageBox.Show("安装完成。", ProductName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                MessageBox.Show(
+                    warning == null ? "安装完成。" : "安装完成。\r\n\r\n" + warning,
+                    ProductName,
+                    MessageBoxButtons.OK,
+                    warning == null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 Close();
             }
             catch (Exception error)

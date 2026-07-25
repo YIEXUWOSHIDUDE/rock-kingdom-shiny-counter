@@ -1,42 +1,83 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import multiprocessing
+import subprocess
 import sys
 from pathlib import Path
 
+if not hasattr(sys, "_MEIPASS"):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-def _write_runtime_info(destination: Path) -> int:
-    import torch
 
+def _probe_runtime(destination: Path) -> int:
     bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
     model_root = bundle_root / "ocr-models"
-    model_hashes: dict[str, str | None] = {}
-    for name in ("craft_mlt_25k.pth", "zh_sim_g2.pth"):
-        model = model_root / name
-        model_hashes[name] = (
-            hashlib.sha256(model.read_bytes()).hexdigest() if model.is_file() else None
-        )
-
-    payload = {
-        "torch": torch.__version__,
-        "cuda_build": torch.version.cuda,
-        "cuda_available": torch.cuda.is_available(),
-        "architectures": torch.cuda.get_arch_list(),
-        "models": model_hashes,
-    }
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    from shiny_counter.runtime_probe import (
+        RuntimeProbeReport,
+        probe_gpu_runtime,
+        write_runtime_probe_report,
     )
-    return 0
+
+    try:
+        import easyocr
+        import torch
+
+        report = probe_gpu_runtime(
+            model_root,
+            torch_module=torch,
+            easyocr_module=easyocr,
+            probe_image_path=bundle_root / "ocr-probe" / "ocr-probe.png",
+            driver_version=_nvidia_driver_version(),
+        )
+    except Exception as error:
+        report = RuntimeProbeReport(
+            ok=False,
+            stage="dependency_import",
+            message=str(error),
+            details={"error_type": type(error).__name__},
+        )
+    return write_runtime_probe_report(destination, report)
+
+
+def _nvidia_driver_version() -> str:
+    try:
+        process = subprocess.run(
+            [
+                "nvidia-smi.exe",
+                "--query-gpu=driver_version",
+                "--format=csv,noheader",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if process.returncode == 0:
+            return process.stdout.splitlines()[0].strip()
+    except (OSError, subprocess.SubprocessError, IndexError):
+        pass
+    return ""
+
+
+def _probe_package(destination: Path) -> int:
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    from shiny_counter.package_probe import probe_packaged_dependencies
+    from shiny_counter.runtime_probe import write_runtime_probe_report
+
+    report = probe_packaged_dependencies(bundle_root)
+    return write_runtime_probe_report(destination, report)
 
 
 def main() -> int:
     multiprocessing.freeze_support()
-    if len(sys.argv) == 3 and sys.argv[1] == "--write-runtime-info":
-        return _write_runtime_info(Path(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] == "--probe-package":
+        return _probe_package(Path(sys.argv[2]))
+    if len(sys.argv) == 3 and sys.argv[1] in {
+        "--probe-runtime",
+        "--write-runtime-info",
+    }:
+        return _probe_runtime(Path(sys.argv[2]))
 
     from shiny_counter.__main__ import main as application_main
 

@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QAction, QCloseEvent, QMouseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QImage, QMouseEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -36,9 +36,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .capture import CaptureError, Win32Capture, WindowInfo, list_visible_windows
+from .capture import Win32Capture, WindowBinding, WindowInfo, list_visible_windows
+from .diagnostics import DiagnosticLog
 from .hotkeys import GlobalHotkeyThread
 from .model import HistoryEvent, PityRound
+from .ocr import notification_banner_rect
 from .storage import AppData, DataStore
 from .worker import RecognitionWorker
 
@@ -347,6 +349,61 @@ class OCRTextDialog(QDialog):
         layout.addWidget(buttons)
 
 
+class CapturePreviewDialog(QDialog):
+    def __init__(
+        self,
+        frame,
+        binding: WindowBinding,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setStyleSheet(DIALOG_STYLE)
+        self.setWindowTitle("游戏窗口截图测试")
+        self.resize(900, 620)
+        layout = QVBoxLayout(self)
+
+        height, width = frame.shape[:2]
+        pixels = frame
+        if frame.shape[2] == 4:
+            image_format = QImage.Format.Format_BGRA8888
+        else:
+            image_format = QImage.Format.Format_BGR888
+        image = QImage(
+            pixels.data,
+            width,
+            height,
+            int(pixels.strides[0]),
+            image_format,
+        ).copy()
+        left, top, crop_width, crop_height = notification_banner_rect(width, height)
+        painter = QPainter(image)
+        painter.setPen(QPen(Qt.GlobalColor.red, max(2, width // 500)))
+        painter.drawRect(left, top, crop_width - 1, crop_height - 1)
+        painter.end()
+
+        preview = QLabel()
+        preview.setObjectName("capturePreview")
+        preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        preview.setPixmap(
+            QPixmap.fromImage(image).scaled(
+                860,
+                500,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        layout.addWidget(preview, 1)
+        self.hint_label = QLabel(
+            f"已捕获：{binding.title} · {width}×{height}。"
+            "红框是实际送入 GPU OCR 的区域。"
+        )
+        self.hint_label.setWordWrap(True)
+        layout.addWidget(self.hint_label)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
 class OverlayWindow(QWidget):
     def __init__(
         self,
@@ -357,6 +414,7 @@ class OverlayWindow(QWidget):
         super().__init__()
         self.store = store
         self.data = store.load()
+        self.diagnostics = DiagnosticLog(store.root)
         self.system_tray_available = (
             QSystemTrayIcon.isSystemTrayAvailable()
             if system_tray_available is None
@@ -430,7 +488,12 @@ class OverlayWindow(QWidget):
         outer.addLayout(primary)
 
         for actions in (
-            [("选窗口", self._select_window), ("设置", self._open_settings), ("历史", self._open_history)],
+            [
+                ("选窗口", self._select_window),
+                ("测试截图", self._show_capture_preview),
+                ("设置", self._open_settings),
+                ("历史", self._open_history),
+            ],
             [("查看文字", self._show_ocr_text), ("导入", self._import_data), ("导出", self._export_data)],
         ):
             row = QHBoxLayout()
@@ -542,7 +605,9 @@ class OverlayWindow(QWidget):
     def closeEvent(self, event: QCloseEvent) -> None:
         self.data.settings.overlay_position = (self.x(), self.y())
         self._save()
-        self._stop_recognition()
+        if not self._stop_recognition(timeout_ms=15000):
+            event.ignore()
+            return
         self._stop_hotkeys()
         if self.tray_icon is not None:
             self.tray_icon.hide()
@@ -644,18 +709,32 @@ class OverlayWindow(QWidget):
         else:
             self.status_label.setText(message)
 
-    def _stop_recognition(self) -> None:
-        if self.recognition_worker is not None:
-            self.recognition_worker.requestInterruption()
-            if not self.recognition_worker.wait(5000):
-                self.recognition_worker.terminate()
-                self.recognition_worker.wait(2000)
-            self.recognition_worker = None
+    def _stop_recognition(self, *, timeout_ms: int = 5000) -> bool:
+        worker = self.recognition_worker
+        if worker is None:
+            return True
+        worker.requestInterruption()
+        if not worker.wait(timeout_ms):
+            message = "GPU OCR 仍在结束本次推理，请稍后再试"
+            self.status_label.setText(message)
+            try:
+                self.diagnostics.record(
+                    stage="worker_shutdown",
+                    code="WORKER_STOP_TIMEOUT",
+                    message=message,
+                    context={"timeout_ms": timeout_ms},
+                )
+            except OSError:
+                pass
+            return False
+        self.recognition_worker = None
+        return True
 
     def _restart_recognition(self) -> None:
-        self._stop_recognition()
+        if not self._stop_recognition():
+            return
         settings = self.data.settings
-        if not settings.window_title or settings.client_size is None:
+        if settings.window_binding() is None:
             self.status_label.setText("请先点击“选窗口”选择游戏客户端")
             return
         worker = RecognitionWorker(settings, self.store.root)
@@ -710,6 +789,21 @@ class OverlayWindow(QWidget):
             self.pending_click_through = False
             self.set_click_through(True)
 
+    def _capture_window_frame(
+        self,
+        binding: WindowBinding,
+        expected_size: tuple[int, int] | None = None,
+    ):
+        capture = Win32Capture(binding)
+        try:
+            frame, _ = capture.capture_client(expected_size)
+            return frame, capture.binding
+        finally:
+            try:
+                capture.close()
+            except Exception:
+                pass
+
     def _select_window(self) -> None:
         windows = [window for window in list_visible_windows() if window.title != self.windowTitle()]
         if not windows:
@@ -722,27 +816,83 @@ class OverlayWindow(QWidget):
         if selected is None:
             return
 
-        capture: Win32Capture | None = None
+        binding = WindowBinding.from_window(selected)
         try:
-            capture = Win32Capture(selected.title)
-            _, client_size = capture.capture_client()
-        except CaptureError as error:
-            QMessageBox.critical(self, "截图失败", str(error))
+            _, binding = self._capture_window_frame(
+                binding,
+                (binding.width, binding.height),
+            )
+        except Exception as error:
+            try:
+                path = self.diagnostics.record(
+                    stage="window_selection",
+                    code="CAPTURE_SELECTION_FAILED",
+                    message="选择窗口后的首次截图失败",
+                    error=error,
+                    context={
+                        "hwnd": binding.hwnd,
+                        "pid": binding.pid,
+                        "class_name": binding.class_name,
+                        "process_path": binding.process_path,
+                        "title": binding.title,
+                        "size": [binding.width, binding.height],
+                    },
+                )
+                log_hint = f"\n\n诊断日志：{path}"
+            except OSError:
+                log_hint = ""
+            QMessageBox.critical(
+                self,
+                "截图失败",
+                f"[CAPTURE_SELECTION_FAILED] {type(error).__name__}：{error}{log_hint}",
+            )
             return
-        finally:
-            if capture is not None:
-                capture.close()
-        self.data.settings.window_title = selected.title
-        self.data.settings.client_size = client_size
+        self.data.settings.set_window_binding(binding)
         self._save()
-        self._restart_recognition()
         self.status_label.setText("窗口已选择，正在启动横幅 OCR")
+        self._restart_recognition()
 
     def _remember_ocr_text(self, text: str) -> None:
-        self.last_ocr_text = text
+        if text.strip():
+            self.last_ocr_text = text
 
     def _show_ocr_text(self) -> None:
         OCRTextDialog(self.last_ocr_text, self).exec()
+
+    def _show_capture_preview(self) -> None:
+        binding = self.data.settings.window_binding()
+        if binding is None:
+            QMessageBox.information(self, "尚未选择窗口", "请先选择游戏窗口。")
+            return
+        try:
+            frame, binding = self._capture_window_frame(binding)
+        except Exception as error:
+            try:
+                path = self.diagnostics.record(
+                    stage="capture_preview",
+                    code="CAPTURE_PREVIEW_FAILED",
+                    message="游戏窗口截图测试失败",
+                    error=error,
+                    context={
+                        "hwnd": binding.hwnd,
+                        "pid": binding.pid,
+                        "class_name": binding.class_name,
+                        "process_path": binding.process_path,
+                        "title": binding.title,
+                    },
+                )
+                log_hint = f"\n\n诊断日志：{path}"
+            except OSError:
+                log_hint = ""
+            QMessageBox.critical(
+                self,
+                "截图测试失败",
+                f"[CAPTURE_PREVIEW_FAILED] {type(error).__name__}：{error}{log_hint}",
+            )
+            return
+        self.data.settings.set_window_binding(binding)
+        self._save()
+        CapturePreviewDialog(frame, binding, self).exec()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(

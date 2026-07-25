@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shutil
 import sys
@@ -11,22 +12,26 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
+from .gpu_policy import validate_cuda_device
+
 
 NOTIFICATION_BANNER_REGION = (0.28, 0.10, 0.72, 0.27)
-OCR_MODEL_FILES = ("craft_mlt_25k.pth", "zh_sim_g2.pth")
+MODEL_LOCK_PATH = Path(
+    getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])
+) / "ocr-models.lock.json"
+OCR_MODEL_LOCK = json.loads(MODEL_LOCK_PATH.read_text(encoding="utf-8"))
+OCR_MODEL_FILES = tuple(OCR_MODEL_LOCK["models"])
 OCR_MODEL_SHA256 = {
-    "craft_mlt_25k.pth": "4a5efbfb48b4081100544e75e1e2b57f8de3d84f213004b14b85fd4b3748db17",
-    "zh_sim_g2.pth": "cb678fdef09d651e7763ca551ad790dc89f0b2e3d2a640484330e338fb574c7a",
+    name: metadata["sha256"]
+    for name, metadata in OCR_MODEL_LOCK["models"].items()
+}
+OCR_MODEL_MD5 = {
+    name: metadata["official_md5"]
+    for name, metadata in OCR_MODEL_LOCK["models"].items()
 }
 OCR_MODEL_SOURCES = {
-    "craft_mlt_25k.pth": (
-        "https://www.modelscope.cn/models/ms-agent/craft_mlt_25k/resolve/master/craft_mlt_25k.zip",
-        "https://github.com/JaidedAI/EasyOCR/releases/download/pre-v1.1.6/craft_mlt_25k.zip",
-    ),
-    "zh_sim_g2.pth": (
-        "https://api.gitcode.com/api/v5/repos/open-source-toolkit/81f68/raw/EASYOCR.zip?ref=main",
-        "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_sim_g2.zip",
-    ),
+    name: tuple(metadata["mirrors"]) + (metadata["official_url"],)
+    for name, metadata in OCR_MODEL_LOCK["models"].items()
 }
 
 
@@ -63,35 +68,6 @@ def download_ocr_model(url: str, destination: Path) -> None:
         package_path.unlink(missing_ok=True)
 
 
-def validate_cuda_device(torch_module: Any) -> str:
-    if not torch_module.cuda.is_available():
-        raise OCRError(
-            "未检测到可用的 NVIDIA CUDA。最低要求：RTX 20 系显卡、"
-            "Windows NVIDIA 驱动 580.88；本程序不支持 CPU 模式。"
-        )
-    capability = tuple(torch_module.cuda.get_device_capability())
-    device_name = str(torch_module.cuda.get_device_name())
-    if capability < (7, 5):
-        raise OCRError(
-            f"显卡 {device_name} 的 CUDA 计算能力 {capability[0]}.{capability[1]} "
-            "低于最低要求 7.5（RTX 20 系）。"
-        )
-    architecture = f"sm_{capability[0]}{capability[1]}"
-    supported_architectures = set(torch_module.cuda.get_arch_list())
-    same_major_compatible = any(
-        (match := re.fullmatch(r"sm_(\d+)(\d)", candidate))
-        and int(match.group(1)) == capability[0]
-        and int(match.group(2)) <= capability[1]
-        for candidate in supported_architectures
-    )
-    if not same_major_compatible:
-        raise OCRError(
-            f"当前 PyTorch CUDA 运行库不包含 {architecture}，无法使用 {device_name}。"
-            "RTX 50 系需要 CUDA 13.0 兼容版安装包。"
-        )
-    return f"CUDA · {device_name} · {architecture}"
-
-
 def ensure_ocr_models(
     model_directory: Path,
     *,
@@ -124,7 +100,7 @@ def ensure_ocr_models(
             shutil.copy2(bundled_directory / name, model_directory / name)
         return "bundled"
 
-    if model_sources is not None and downloader is not None:
+    if model_sources and downloader is not None:
         for name in OCR_MODEL_FILES:
             destination = model_directory / name
             if valid(destination, name):
@@ -170,12 +146,18 @@ def normalize_text(text: str) -> str:
 def crop_notification_banner(frame: Any) -> Any:
     """Crop the top-centre notification banner using resolution-independent ratios."""
     height, width = frame.shape[:2]
+    left, top, crop_width, crop_height = notification_banner_rect(width, height)
+    return frame[top : top + crop_height, left : left + crop_width]
+
+
+def notification_banner_rect(width: int, height: int) -> tuple[int, int, int, int]:
+    """Return the OCR banner rectangle as left, top, width, and height."""
     left_ratio, top_ratio, right_ratio, bottom_ratio = NOTIFICATION_BANNER_REGION
     left = int(width * left_ratio)
     top = int(height * top_ratio)
     right = int(width * right_ratio)
     bottom = int(height * bottom_ratio)
-    return frame[top:bottom, left:right]
+    return left, top, right - left, bottom - top
 
 
 class OCRKeywordMatcher:
@@ -235,6 +217,8 @@ class EasyOCREngine:
             bundled_model_directory = Path(
                 getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)
             ) / "ocr-models"
+        if hasattr(sys, "_MEIPASS") and model_sources is None:
+            model_sources = {}
         ensure_ocr_models(
             model_directory,
             bundled_directory=bundled_model_directory,
@@ -245,7 +229,7 @@ class EasyOCREngine:
         try:
             self.reader = easyocr.Reader(
                 ["ch_sim", "en"],
-                gpu=True,
+                gpu="cuda",
                 model_storage_directory=str(model_directory),
                 download_enabled=False,
                 verbose=False,
