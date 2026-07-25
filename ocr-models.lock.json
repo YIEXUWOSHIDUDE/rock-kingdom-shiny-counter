@@ -1,0 +1,21 @@
+{
+  "easyocr_version": "1.7.2",
+  "models": {
+    "craft_mlt_25k.pth": {
+      "official_url": "https://github.com/JaidedAI/EasyOCR/releases/download/pre-v1.1.6/craft_mlt_25k.zip",
+      "official_md5": "2f8227d2def4037cdb3b34389dcf9ec1",
+      "sha256": "4a5efbfb48b4081100544e75e1e2b57f8de3d84f213004b14b85fd4b3748db17",
+      "mirrors": [
+        "https://www.modelscope.cn/models/ms-agent/craft_mlt_25k/resolve/master/craft_mlt_25k.zip"
+      ]
+    },
+    "zh_sim_g2.pth": {
+      "official_url": "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_sim_g2.zip",
+      "official_md5": "b601ce7143293387d3ec4f41a66edc07",
+      "sha256": "cb678fdef09d651e7763ca551ad790dc89f0b2e3d2a640484330e338fb574c7a",
+      "mirrors": [
+        "https://api.gitcode.com/api/v5/repos/open-source-toolkit/81f68/raw/EASYOCR.zip?ref=main"
+      ]
+    }
+  }
+}

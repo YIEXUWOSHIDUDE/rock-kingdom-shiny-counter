@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .capture import WindowBinding
 from .model import CounterState, HistoryEvent, PityRound
 
 
@@ -39,6 +40,10 @@ def default_data_dir() -> Path:
 class AppSettings:
     window_title: str = ""
     client_size: tuple[int, int] | None = None
+    window_hwnd: int = 0
+    window_pid: int = 0
+    window_class_name: str = ""
+    window_process_path: str = ""
     ocr_keywords: list[str] = field(default_factory=lambda: ["写进了童话里"])
     ocr_min_confidence: float = 0.55
     ocr_interval_ms: int = 200
@@ -63,6 +68,27 @@ class AppSettings:
             return {}
         return {"disable_click_through": shortcut}
 
+    def set_window_binding(self, binding: WindowBinding) -> None:
+        self.window_title = binding.title
+        self.client_size = (binding.width, binding.height)
+        self.window_hwnd = binding.hwnd
+        self.window_pid = binding.pid
+        self.window_class_name = binding.class_name
+        self.window_process_path = binding.process_path
+
+    def window_binding(self) -> WindowBinding | None:
+        if not self.window_title or self.client_size is None:
+            return None
+        return WindowBinding(
+            hwnd=self.window_hwnd,
+            pid=self.window_pid,
+            class_name=self.window_class_name,
+            process_path=self.window_process_path,
+            title=self.window_title,
+            width=self.client_size[0],
+            height=self.client_size[1],
+        )
+
     def validate(self) -> None:
         if not 0.30 <= self.opacity <= 1:
             raise ValueError("opacity must be between 0.30 and 1")
@@ -78,6 +104,8 @@ class AppSettings:
             len(self.client_size) != 2 or self.client_size[0] < 1 or self.client_size[1] < 1
         ):
             raise ValueError("client_size must contain two positive values")
+        if self.window_hwnd < 0 or self.window_pid < 0:
+            raise ValueError("window identifiers cannot be negative")
         if self.overlay_position is not None and len(self.overlay_position) != 2:
             raise ValueError("overlay_position must contain two values")
 
@@ -144,6 +172,10 @@ class AppData:
         settings = AppSettings(
             window_title=str(settings_raw.get("window_title", "")),
             client_size=tuple(map(int, client_size_raw)) if client_size_raw is not None else None,
+            window_hwnd=int(settings_raw.get("window_hwnd", 0)),
+            window_pid=int(settings_raw.get("window_pid", 0)),
+            window_class_name=str(settings_raw.get("window_class_name", "")),
+            window_process_path=str(settings_raw.get("window_process_path", "")),
             ocr_keywords=[str(item) for item in settings_raw.get("ocr_keywords", ["写进了童话里"])],
             ocr_min_confidence=float(settings_raw.get("ocr_min_confidence", 0.55)),
             ocr_interval_ms=int(settings_raw.get("ocr_interval_ms", 200)),

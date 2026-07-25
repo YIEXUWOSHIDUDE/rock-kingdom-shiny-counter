@@ -4,10 +4,36 @@ import unittest
 import zipfile
 from pathlib import Path
 
+from shiny_counter.capture import WindowBinding
 from shiny_counter.storage import AppSettings, DataCorruptError, DataStore
 
 
 class DataStoreTests(unittest.TestCase):
+    def test_window_binding_survives_a_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            data = store.load()
+            data.settings.set_window_binding(
+                WindowBinding(
+                    hwnd=100,
+                    pid=42,
+                    class_name="NRCGameWindow",
+                    process_path=r"C:\Games\NRC-Win64-Shipping.exe",
+                    title="洛克王国：世界",
+                    width=1920,
+                    height=1080,
+                )
+            )
+
+            store.save(data)
+            loaded = store.load()
+            binding = loaded.settings.window_binding()
+
+            self.assertIsNotNone(binding)
+            self.assertEqual(100, binding.hwnd)
+            self.assertEqual(42, binding.pid)
+            self.assertEqual("NRCGameWindow", binding.class_name)
+
     def test_global_hotkeys_are_disabled_by_default(self) -> None:
         settings = AppSettings()
 

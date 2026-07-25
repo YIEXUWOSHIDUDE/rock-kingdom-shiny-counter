@@ -6,6 +6,10 @@ __pycache__/
 htmlcov/
 dist/
 build/
+release/
+.scratch/
+*.test.exe
+tests/CompatibilityTests.exe
 *.egg-info/
 .DS_Store
 

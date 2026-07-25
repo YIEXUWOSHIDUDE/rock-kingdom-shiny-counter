@@ -102,11 +102,16 @@ internal sealed class CompatibilityReport
     internal List<CompatibilityCheck> Checks { get; private set; }
     internal bool CanInstall
     {
-        get { return Checks.All(item => item.Severity != CompatibilitySeverity.Fail); }
+        get { return Checks.All(item => item.Severity == CompatibilitySeverity.Pass); }
     }
     internal bool HasWarnings
     {
         get { return Checks.Any(item => item.Severity == CompatibilitySeverity.Warning); }
+    }
+
+    internal bool HasFailures
+    {
+        get { return Checks.Any(item => item.Severity == CompatibilitySeverity.Fail); }
     }
 
     internal string ToDisplayText()
@@ -125,7 +130,9 @@ internal sealed class CompatibilityReport
 
 internal static class CompatibilityEvaluator
 {
-    private const long MinimumDiskBytes = 8L * 1024 * 1024 * 1024;
+    internal const int MinimumDiskGigabytes = 5;
+    internal const long MinimumDiskBytes =
+        (long)MinimumDiskGigabytes * 1024 * 1024 * 1024;
 
     internal static CompatibilityReport Evaluate(CompatibilitySnapshot snapshot)
     {

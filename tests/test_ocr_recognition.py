@@ -8,13 +8,16 @@ from unittest.mock import patch
 
 import numpy as np
 
+from shiny_counter.gpu_policy import GPUCompatibilityError
 from shiny_counter.ocr import (
     EasyOCREngine,
+    OCRError,
     OCRKeywordMatcher,
     OCRText,
     crop_notification_banner,
     download_ocr_model,
     ensure_ocr_models,
+    notification_banner_rect,
     validate_cuda_device,
 )
 
@@ -26,6 +29,10 @@ class OCRKeywordMatcherTests(unittest.TestCase):
         cropped = crop_notification_banner(frame)
 
         self.assertEqual(cropped.shape, (198, 1115, 3))
+        self.assertEqual(
+            notification_banner_rect(2532, 1170),
+            (708, 117, 1115, 198),
+        )
 
     def test_keyword_match_tolerates_spaces_and_ignores_low_confidence_text(self) -> None:
         matcher = OCRKeywordMatcher(["污染解除", "噩梦枷锁"], min_confidence=0.55)
@@ -125,6 +132,26 @@ class OCRModelProvisioningTests(unittest.TestCase):
         finally:
             shutil.rmtree(root, ignore_errors=True)
 
+    def test_empty_model_sources_disable_all_downloads(self) -> None:
+        root = Path(__file__).parent / "_tmp_offline_models"
+        shutil.rmtree(root, ignore_errors=True)
+        network_calls: list[str] = []
+
+        def fail_if_called(url: str, destination: Path) -> None:
+            network_calls.append(url)
+
+        try:
+            with self.assertRaisesRegex(OCRError, "模型缺失"):
+                ensure_ocr_models(
+                    root,
+                    expected_hashes=None,
+                    model_sources={},
+                    downloader=fail_if_called,
+                )
+            self.assertEqual(network_calls, [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
     def test_default_sources_use_verified_domestic_mirrors_before_github(self) -> None:
         root = Path(__file__).parent / "_tmp_default_model_sources"
         shutil.rmtree(root, ignore_errors=True)
@@ -175,10 +202,11 @@ class CUDACompatibilityTests(unittest.TestCase):
             cuda = UnavailableCuda()
 
         with self.assertRaisesRegex(
-            RuntimeError,
+            GPUCompatibilityError,
             "RTX 20.*580\\.88.*不支持 CPU",
-        ):
+        ) as raised:
             validate_cuda_device(FakeTorch())
+        self.assertEqual("CUDA_UNAVAILABLE", raised.exception.code)
 
     def test_pre_rtx_gpu_is_rejected_by_compute_capability(self) -> None:
         class LegacyCuda:
@@ -197,8 +225,12 @@ class CUDACompatibilityTests(unittest.TestCase):
         class FakeTorch:
             cuda = LegacyCuda()
 
-        with self.assertRaisesRegex(RuntimeError, "计算能力 6\\.1.*最低要求 7\\.5"):
+        with self.assertRaisesRegex(
+            GPUCompatibilityError,
+            "计算能力 6\\.1.*最低要求 7\\.5",
+        ) as raised:
             validate_cuda_device(FakeTorch())
+        self.assertEqual("CUDA_ARCH_UNSUPPORTED", raised.exception.code)
 
     def test_runtime_must_include_the_detected_gpu_architecture(self) -> None:
         class BlackwellCuda:
@@ -286,15 +318,24 @@ class CUDACompatibilityTests(unittest.TestCase):
             with patch.dict(
                 sys.modules,
                 {"torch": fake_torch, "easyocr": fake_easyocr},
-            ), patch.object(sys, "_MEIPASS", str(root), create=True):
+            ), patch.object(
+                sys,
+                "_MEIPASS",
+                str(root),
+                create=True,
+            ), patch(
+                "shiny_counter.ocr.ensure_ocr_models",
+                wraps=ensure_ocr_models,
+            ) as provision:
                 engine = EasyOCREngine(
                     target,
                     expected_hashes=None,
                 )
 
-            self.assertTrue(reader_arguments["gpu"])
+            self.assertEqual("cuda", reader_arguments["gpu"])
             self.assertFalse(reader_arguments["download_enabled"])
             self.assertIn("RTX 3070", engine.device_label)
+            self.assertEqual({}, provision.call_args.kwargs["model_sources"])
         finally:
             shutil.rmtree(root, ignore_errors=True)
 

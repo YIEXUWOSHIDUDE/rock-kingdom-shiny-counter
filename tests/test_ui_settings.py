@@ -123,6 +123,35 @@ class SettingsBehaviorTests(unittest.TestCase):
             finally:
                 window.close()
 
+    def test_timed_out_gpu_worker_is_not_force_terminated_or_discarded(self) -> None:
+        class SlowGpuWorker:
+            def __init__(self) -> None:
+                self.interruption_requested = False
+
+            def requestInterruption(self) -> None:
+                self.interruption_requested = True
+
+            def wait(self, timeout_ms: int) -> bool:
+                return False
+
+        with tempfile.TemporaryDirectory() as directory:
+            window = OverlayWindow(
+                DataStore(Path(directory)),
+                system_tray_available=False,
+            )
+            slow_worker = SlowGpuWorker()
+            window.recognition_worker = slow_worker
+            try:
+                stopped = window._stop_recognition(timeout_ms=1)
+
+                self.assertFalse(stopped)
+                self.assertTrue(slow_worker.interruption_requested)
+                self.assertIs(window.recognition_worker, slow_worker)
+                self.assertIn("仍在结束", window.status_label.text())
+            finally:
+                window.recognition_worker = None
+                window.close()
+
     def test_hotkey_registration_failure_only_updates_status(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DataStore(Path(directory))
