@@ -54,7 +54,7 @@ QWidget#overlay {
 QWidget#overlay > QLabel { color: #ffffff; }
 QWidget#overlay > QLabel#count { font-size: 38px; font-weight: 700; color: #55e6ff; }
 QWidget#overlay > QLabel#target { font-size: 15px; font-weight: 700; color: #ffd166; }
-QWidget#overlay > QLabel#status { color: #dbeafe; font-size: 11px; font-weight: 600; }
+QWidget#overlay > QLabel#status { color: #fef08a; font-size: 12px; font-weight: 700; }
 QWidget#overlay > QPushButton {
     background: #293852;
     color: #ffffff;
@@ -101,6 +101,33 @@ QDialog QPushButton:hover {
     background: #d9e3f1;
 }
 """
+
+
+def compact_recognition_status(message: str) -> str:
+    code = ""
+    body = message.strip()
+    if body.startswith("[") and "]" in body:
+        code, _, body = body[1:].partition("]")
+        body = body.strip()
+    fixed = {
+        "GPU_CHECKING": "正在启动 GPU 识别…",
+        "CAPTURE_READY": "已找到并截图游戏窗口，正在启动 GPU OCR…",
+        "OCR_READY": "自动计数已就绪，等待结算横幅",
+        "OCR_NO_TEXT": "识别正常，等待结算横幅",
+        "OCR_MATCH": "已识别结算横幅，计数 +1",
+        "CAPTURE_UNAVAILABLE": "游戏窗口暂时无法截图，请恢复游戏窗口",
+        "PAUSED": "自动识别已暂停",
+    }
+    if code in fixed:
+        return fixed[code]
+    if code == "OCR_TEXT_NO_MATCH":
+        _, separator, preview = body.rpartition("：")
+        if not separator:
+            preview = body
+        return "已读到文字但未匹配：" + preview[:36]
+    if code.startswith("CUDA_"):
+        return body
+    return body if len(body) <= 100 else body[:99] + "…"
 
 
 class WindowPickerDialog(QDialog):
@@ -506,6 +533,11 @@ class OverlayWindow(QWidget):
         self.status_label = QLabel("准备中")
         self.status_label.setObjectName("status")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setWordWrap(True)
+        self.status_label.setMinimumHeight(38)
+        self.status_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         outer.addWidget(self.status_label)
         self._refresh_position_lock_button()
 
@@ -704,10 +736,15 @@ class OverlayWindow(QWidget):
         self._set_click_through(enabled, persist=persist)
 
     def _recognition_status(self, message: str, score: float) -> None:
+        detail = message
         if score >= 0:
-            self.status_label.setText(f"{message}，置信度 {score:.3f}")
-        else:
-            self.status_label.setText(message)
+            detail = f"{message}，置信度 {score:.3f}"
+        self.status_label.setToolTip(detail)
+        self.status_label.setText(compact_recognition_status(message))
+
+    def _recognition_stopped(self, message: str) -> None:
+        self.status_label.setToolTip(message)
+        self.status_label.setText(compact_recognition_status(message))
 
     def _stop_recognition(self, *, timeout_ms: int = 5000) -> bool:
         worker = self.recognition_worker
@@ -741,7 +778,7 @@ class OverlayWindow(QWidget):
         worker.detected.connect(self._auto_increment)
         worker.status_changed.connect(self._recognition_status)
         worker.ocr_text_changed.connect(self._remember_ocr_text)
-        worker.stopped_with_error.connect(self.status_label.setText)
+        worker.stopped_with_error.connect(self._recognition_stopped)
         worker.set_paused(self.paused)
         self.recognition_worker = worker
         worker.start()

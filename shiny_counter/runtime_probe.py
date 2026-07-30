@@ -9,6 +9,7 @@ from typing import Any, Mapping
 
 from .gpu_policy import (
     GPUCompatibilityError,
+    NvidiaGPUInfo,
     validate_cuda_device,
     validate_release_cuda_build,
 )
@@ -45,18 +46,34 @@ def probe_gpu_runtime(
     probe_image: Any | None = None,
     probe_image_path: Path | None = None,
     driver_version: str = "",
+    gpu_name: str = "",
 ) -> RuntimeProbeReport:
     details = {
         "torch": str(torch_module.__version__),
         "cuda_build": str(torch_module.version.cuda),
         "driver": driver_version,
+        "gpu": gpu_name,
     }
     if not torch_module.cuda.is_available():
-        details["error_type"] = "CUDAUnavailable"
+        error = None
+        try:
+            validate_cuda_device(
+                torch_module,
+                nvidia_info=(
+                    NvidiaGPUInfo(gpu_name, driver_version)
+                    if gpu_name or driver_version
+                    else None
+                ),
+            )
+        except GPUCompatibilityError as compatibility_error:
+            error = compatibility_error
+        details["error_type"] = type(error).__name__
+        if error is not None:
+            details["error_code"] = error.code
         return RuntimeProbeReport(
             ok=False,
             stage="cuda_available",
-            message="CUDA 不可用；GPU-only 模式不允许 CPU 回退。",
+            message=str(error or "CUDA 不可用；GPU-only 模式不允许 CPU 回退。"),
             details=details,
         )
     stage = "cuda_inventory"

@@ -19,6 +19,7 @@ internal static class CompatibilityTests
             return;
         }
         Run("supported RTX 5070 can install", SupportedRtx5070CanInstall);
+        Run("driver below CUDA 12.8 minimum blocks installation", OldDriverBlocksInstallation);
         Run("unsupported GPU blocks installation", UnsupportedGpuBlocksInstallation);
         Run("unknown GPU details block GPU-only installation", UnknownGpuDetailsBlockGpuOnlyInstallation);
         Run("unsupported Windows or disk blocks installation", UnsupportedSystemBlocksInstallation);
@@ -46,7 +47,7 @@ internal static class CompatibilityTests
         snapshot.Gpus.Add(new GpuSnapshot(
             "NVIDIA GeForce RTX 5070",
             12L * 1024,
-            "580.88",
+            "570.65",
             12,
             0));
 
@@ -54,6 +55,25 @@ internal static class CompatibilityTests
 
         Assert(report.CanInstall, report.ToDisplayText());
         Assert(!report.HasWarnings, report.ToDisplayText());
+    }
+
+    private static void OldDriverBlocksInstallation()
+    {
+        CompatibilitySnapshot snapshot = new CompatibilitySnapshot();
+        snapshot.Is64BitOperatingSystem = true;
+        snapshot.WindowsBuild = 26100;
+        snapshot.AvailableDiskBytes = 20L * 1024 * 1024 * 1024;
+        snapshot.Gpus.Add(new GpuSnapshot(
+            "NVIDIA GeForce RTX 4070",
+            8L * 1024,
+            "566.36",
+            8,
+            9));
+
+        CompatibilityReport report = CompatibilityEvaluator.Evaluate(snapshot);
+
+        Assert(!report.CanInstall, report.ToDisplayText());
+        Assert(report.ToDisplayText().Contains("最低 570.65"), report.ToDisplayText());
     }
 
     private static void InstallerVersionComesFromEmbeddedVersion()
@@ -72,7 +92,7 @@ internal static class CompatibilityTests
         snapshot.Gpus.Add(new GpuSnapshot(
             "NVIDIA GeForce RTX 5070",
             12L * 1024,
-            "580.88",
+            "570.65",
             12,
             0));
 
@@ -140,14 +160,14 @@ internal static class CompatibilityTests
     {
         string output =
             "NVIDIA GeForce RTX 3050 Laptop GPU, 4096, 581.29, 8.6\r\n"
-            + "NVIDIA GeForce RTX 5070, 12227, 580.88, 12.0\r\n";
+            + "NVIDIA GeForce RTX 5070, 12227, 570.65, 12.0\r\n";
 
         List<GpuSnapshot> gpus = CompatibilityDetector.ParseNvidiaSmiOutput(output);
 
         Assert(gpus.Count == 2, "expected two GPUs");
         Assert(gpus[0].MemoryMegabytes == 4096, "memory parse failed");
         Assert(gpus[0].ComputeMajor == 8 && gpus[0].ComputeMinor == 6, "compute parse failed");
-        Assert(gpus[1].DriverVersion == "580.88", "driver parse failed");
+        Assert(gpus[1].DriverVersion == "570.65", "driver parse failed");
     }
 
     private static void GpuDetectionFailureBlocksGpuOnlyInstallation()
@@ -197,13 +217,13 @@ internal static class CompatibilityTests
             4,
             "{\"ok\":false,\"stage\":\"cuda_available\","
             + "\"message\":\"CUDA 不可用；不允许 CPU 回退。\","
-            + "\"details\":{\"torch\":\"2.13.0+cu130\","
-            + "\"cuda_build\":\"13.0\",\"driver\":\"561.09\"}}");
+            + "\"details\":{\"torch\":\"2.11.0+cu128\","
+            + "\"cuda_build\":\"12.8\",\"driver\":\"561.09\"}}");
 
         Assert(!result.Success, "failed runtime probe must block replacement");
         Assert(result.DisplayText.Contains("cuda_available"), result.DisplayText);
         Assert(result.DisplayText.Contains("不允许 CPU"), result.DisplayText);
-        Assert(result.DisplayText.Contains("2.13.0+cu130"), result.DisplayText);
+        Assert(result.DisplayText.Contains("2.11.0+cu128"), result.DisplayText);
         Assert(result.DisplayText.Contains("561.09"), result.DisplayText);
     }
 

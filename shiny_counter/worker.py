@@ -80,9 +80,13 @@ class RecognitionWorker(QThread):
             log_hint = f"；日志：{path}"
         except OSError:
             log_hint = ""
-        self.stopped_with_error.emit(
-            f"[{code}] {message}（{type(error).__name__}）：{error}{log_hint}"
-        )
+        if isinstance(error, GPUCompatibilityError):
+            display_message = f"[{error.code}] {error}"
+        else:
+            display_message = (
+                f"[{code}] {message}（{type(error).__name__}）：{error}{log_hint}"
+            )
+        self.stopped_with_error.emit(display_message)
 
     def _report_capture_unavailable(
         self,

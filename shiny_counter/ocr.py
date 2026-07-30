@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
 
 from .gpu_policy import validate_cuda_device
+from .nvidia import query_nvidia_gpu
 
 
 NOTIFICATION_BANNER_REGION = (0.28, 0.10, 0.72, 0.27)
@@ -212,7 +213,10 @@ class EasyOCREngine:
                 "缺少 OCR 依赖，请重新执行 python -m pip install -r requirements.txt"
             ) from error
 
-        self.device_label = validate_cuda_device(torch)
+        self.device_label = validate_cuda_device(
+            torch,
+            nvidia_info=query_nvidia_gpu(),
+        )
         if bundled_model_directory is None:
             bundled_model_directory = Path(
                 getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)

@@ -131,6 +131,9 @@ internal sealed class CompatibilityReport
 internal static class CompatibilityEvaluator
 {
     internal const int MinimumDiskGigabytes = 5;
+    internal const int MinimumDriverMajor = 570;
+    internal const int MinimumDriverMinor = 65;
+    internal const string MinimumDriverText = "570.65";
     internal const long MinimumDiskBytes =
         (long)MinimumDiskGigabytes * 1024 * 1024 * 1024;
 
@@ -164,7 +167,10 @@ internal static class CompatibilityEvaluator
         bool driverKnown = gpu != null
             && gpu.MetricsReliable
             && !string.IsNullOrWhiteSpace(gpu.DriverVersion);
-        bool driverSupported = driverKnown && DriverAtLeast(gpu.DriverVersion, 580, 88);
+        bool driverSupported = driverKnown && DriverAtLeast(
+            gpu.DriverVersion,
+            MinimumDriverMajor,
+            MinimumDriverMinor);
         bool computeKnown = gpu != null
             && gpu.MetricsReliable
             && gpu.HasComputeCapability;
@@ -196,7 +202,7 @@ internal static class CompatibilityEvaluator
                 ? CompatibilitySeverity.Warning
                 : driverSupported ? CompatibilitySeverity.Pass : CompatibilitySeverity.Fail,
             driverKnown
-                ? gpu.DriverVersion + "（最低 580.88）"
+                ? gpu.DriverVersion + "（最低 " + MinimumDriverText + "）"
                 : "无法读取"));
         checks.Add(new CompatibilityCheck(
             "CUDA 计算能力",

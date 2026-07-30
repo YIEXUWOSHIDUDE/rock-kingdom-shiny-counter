@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from shiny_counter.gpu_policy import GPUCompatibilityError
+from shiny_counter.gpu_policy import GPUCompatibilityError, NvidiaGPUInfo
 from shiny_counter.ocr import (
     EasyOCREngine,
     OCRError,
@@ -203,7 +203,7 @@ class CUDACompatibilityTests(unittest.TestCase):
 
         with self.assertRaisesRegex(
             GPUCompatibilityError,
-            "RTX 20.*580\\.88.*不支持 CPU",
+            "RTX 20.*570\\.65.*不支持 CPU",
         ) as raised:
             validate_cuda_device(FakeTorch())
         self.assertEqual("CUDA_UNAVAILABLE", raised.exception.code)
@@ -253,8 +253,54 @@ class CUDACompatibilityTests(unittest.TestCase):
         class FakeTorch:
             cuda = BlackwellCuda()
 
-        with self.assertRaisesRegex(RuntimeError, "不包含 sm_120.*CUDA 13\\.0"):
+        with self.assertRaisesRegex(RuntimeError, "不包含 sm_120.*CUDA 12\\.8"):
             validate_cuda_device(FakeTorch())
+
+    def test_old_driver_is_reported_with_gpu_name_and_required_version(self) -> None:
+        class UnavailableCuda:
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+        class FakeTorch:
+            cuda = UnavailableCuda()
+
+        with self.assertRaisesRegex(
+            GPUCompatibilityError,
+            "RTX 4070.*566\\.36.*570\\.65.*不会切换到 CPU",
+        ) as raised:
+            validate_cuda_device(
+                FakeTorch(),
+                nvidia_info=NvidiaGPUInfo(
+                    name="NVIDIA GeForce RTX 4070",
+                    driver_version="566.36",
+                ),
+            )
+
+        self.assertEqual("CUDA_DRIVER_TOO_OLD", raised.exception.code)
+
+    def test_current_driver_with_unavailable_cuda_reports_broken_runtime(self) -> None:
+        class UnavailableCuda:
+            @staticmethod
+            def is_available() -> bool:
+                return False
+
+        class FakeTorch:
+            cuda = UnavailableCuda()
+
+        with self.assertRaisesRegex(
+            GPUCompatibilityError,
+            "RTX 4070.*572\\.16.*CUDA 12\\.8 无法启动.*重装 GPU 版",
+        ) as raised:
+            validate_cuda_device(
+                FakeTorch(),
+                nvidia_info=NvidiaGPUInfo(
+                    name="NVIDIA GeForce RTX 4070",
+                    driver_version="572.16",
+                ),
+            )
+
+        self.assertEqual("CUDA_RUNTIME_UNAVAILABLE", raised.exception.code)
 
     def test_same_major_cuda_binary_supports_a_newer_minor_gpu(self) -> None:
         class AdaCuda:
