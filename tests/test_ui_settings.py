@@ -16,13 +16,37 @@ from PySide6.QtWidgets import (
 )
 
 from shiny_counter.storage import AppData, DataStore
-from shiny_counter.ui import OverlayWindow, SettingsDialog
+from shiny_counter.ui import OverlayWindow, SettingsDialog, compact_recognition_status
 
 
 class SettingsBehaviorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_recognition_status_hides_diagnostics_but_keeps_useful_outcome(self) -> None:
+        self.assertEqual(
+            "已找到并截图游戏窗口，正在启动 GPU OCR…",
+            compact_recognition_status("[CAPTURE_READY] 游戏窗口首帧捕获成功"),
+        )
+        self.assertEqual(
+            "识别正常，等待结算横幅",
+            compact_recognition_status(
+                "[OCR_NO_TEXT] OCR CUDA · RTX 4070 · 84 ms · 缓冲 5 ms：未识别到文字"
+            ),
+        )
+        self.assertEqual(
+            "已读到文字但未匹配：获得经验值",
+            compact_recognition_status(
+                "[OCR_TEXT_NO_MATCH] OCR CUDA · RTX 4070 · 91 ms：获得经验值"
+            ),
+        )
+        self.assertEqual(
+            "识别未启动：RTX 4070 驱动 566.36 过旧，请升级。",
+            compact_recognition_status(
+                "[CUDA_DRIVER_TOO_OLD] 识别未启动：RTX 4070 驱动 566.36 过旧，请升级。"
+            ),
+        )
 
     def test_global_hotkeys_are_opt_in_and_only_recover_click_through(self) -> None:
         dialog = SettingsDialog(AppData())

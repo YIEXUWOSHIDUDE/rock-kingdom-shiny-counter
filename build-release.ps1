@@ -1,7 +1,7 @@
 ﻿param(
     [string]$ModelDirectory = "$env:APPDATA\RockKingdomShinyCounter\ocr-models",
-    [string]$VenvDirectory = "release\.venv-cuda130",
-    [string]$WheelhouseDirectory = "release\wheelhouse-win-py313",
+    [string]$VenvDirectory = "release\.venv-cuda128",
+    [string]$WheelhouseDirectory = "release\wheelhouse-win-py313-cu128",
     [switch]$ReuseEnvironment,
     [switch]$SkipTests,
     [switch]$SkipLocalGpuProbe
@@ -74,7 +74,7 @@ if (-not $ReuseEnvironment) {
             py -3.13 -m pip download `
                 --dest $WheelhouseDirectory `
                 --only-binary=:all: `
-                --extra-index-url https://download.pytorch.org/whl/cu130 `
+                --extra-index-url https://download.pytorch.org/whl/cu128 `
                 -r requirements-lock-win-py313.txt
         }
         Invoke-Checked "生成 wheelhouse SHA-256 清单" {
@@ -112,7 +112,7 @@ $StagingRoot = Reset-ProjectDirectory (Join-Path $Root "release\staging")
 $OutputRoot = Reset-ProjectDirectory (Join-Path $Root "release\out")
 $BuildEnvironment = Join-Path $OutputRoot "build-environment.json"
 
-Invoke-Checked "验证 CUDA 13 wheel、目标架构与模型哈希" {
+Invoke-Checked "验证 CUDA 12.8 wheel、目标架构与模型哈希" {
     & $Python -m build_tools.release_validation `
         --model-dir $ModelDirectory `
         --output $BuildEnvironment
@@ -163,6 +163,29 @@ $Csc = (
 ).FullName
 if (-not $Csc) {
     throw "找不到 .NET Framework C# 编译器 csc.exe"
+}
+
+$CompatibilityTests = Join-Path $BuildRoot "CompatibilityTests.exe"
+Invoke-Checked "编译安装器兼容性测试" {
+    & $Csc `
+        /nologo `
+        /target:exe `
+        "/out:$CompatibilityTests" `
+        "/resource:$(Join-Path $Root 'VERSION'),RockKingdomShinyCounter.VERSION" `
+        /r:System.Management.dll `
+        /r:System.IO.Compression.dll `
+        /r:System.IO.Compression.FileSystem.dll `
+        /r:System.Web.Extensions.dll `
+        packaging\Compatibility.cs `
+        packaging\ProductVersion.cs `
+        packaging\AppendedPayload.cs `
+        packaging\PayloadManifest.cs `
+        packaging\RuntimeProbe.cs `
+        packaging\StagedInstall.cs `
+        tests\CompatibilityTests.cs
+}
+Invoke-Checked "运行安装器兼容性测试" {
+    & $CompatibilityTests
 }
 
 Invoke-Checked "编译卸载程序" {

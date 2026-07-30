@@ -68,7 +68,7 @@ internal static class Installer
         string staging = target + ".new-" + Guid.NewGuid().ToString("N");
         try
         {
-            report("正在从安装包解压 CUDA 13 与 OCR 文件……");
+            report("正在从安装包解压 CUDA 12.8 与 OCR 文件……");
             AppendedPayload.Extract(
                 Process.GetCurrentProcess().MainModule.FileName,
                 staging);
@@ -199,7 +199,7 @@ internal static class Installer
             Font = new Font("Microsoft YaHei UI", 10F);
 
             Label title = new Label { Left = 26, Top = 20, Width = 590, Height = 34, Text = ProductName + "  v" + Version, Font = new Font(Font.FontFamily, 17F, FontStyle.Bold) };
-            Label requirements = new Label { Left = 28, Top = 62, Width = 590, Height = 60, Text = "最低要求：Windows 10 22H2 / Windows 11 x64、NVIDIA RTX 20/30/40/50、\n驱动 580.88 或更高、4 GB 显存、" + CompatibilityEvaluator.MinimumDiskGigabytes + " GB 可用磁盘空间；只使用 GPU，不降级到 CPU。" };
+            Label requirements = new Label { Left = 28, Top = 62, Width = 590, Height = 60, Text = "最低要求：Windows 10 22H2 / Windows 11 x64、NVIDIA RTX 20/30/40/50、\n驱动 " + CompatibilityEvaluator.MinimumDriverText + " 或更高、4 GB 显存、" + CompatibilityEvaluator.MinimumDiskGigabytes + " GB 可用磁盘空间；只使用 GPU，不降级到 CPU。" };
             Label compatibilityTitle = new Label { Left = 28, Top = 130, Width = 590, Height = 24, Text = "安装前兼容性检测", Font = new Font(Font.FontFamily, 10F, FontStyle.Bold) };
             compatibility = new ListView { Left = 28, Top = 158, Width = 590, Height = 180, View = View.List, HeaderStyle = ColumnHeaderStyle.None, MultiSelect = false, HideSelection = false };
             compatibility.Items.Add("正在检测系统和 NVIDIA GPU……");

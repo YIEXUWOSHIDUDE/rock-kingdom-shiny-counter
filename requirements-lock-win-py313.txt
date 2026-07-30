@@ -33,6 +33,6 @@ shapely==2.1.2
 shiboken6==6.11.1
 sympy==1.14.0
 tifffile==2026.7.14
-torch==2.13.0+cu130
-torchvision==0.28.0+cu130
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
 typing_extensions==4.15.0

@@ -31,7 +31,7 @@ class RuntimeProbeTests(unittest.TestCase):
             Path("unused"),
             torch_module=types.SimpleNamespace(
                 __version__="test",
-                version=types.SimpleNamespace(cuda="13.0"),
+                version=types.SimpleNamespace(cuda="12.8"),
                 cuda=UnavailableCuda(),
             ),
             easyocr_module=types.SimpleNamespace(Reader=reader_factory),
@@ -42,7 +42,7 @@ class RuntimeProbeTests(unittest.TestCase):
         self.assertIn("不允许 CPU", report.message)
         self.assertFalse(reader_started)
 
-    def test_cuda_126_package_is_rejected_before_any_gpu_inference(self) -> None:
+    def test_cuda_130_package_is_rejected_before_any_gpu_inference(self) -> None:
         tensor_created = False
 
         class AvailableCuda:
@@ -74,8 +74,8 @@ class RuntimeProbeTests(unittest.TestCase):
         report = probe_gpu_runtime(
             Path("unused"),
             torch_module=types.SimpleNamespace(
-                __version__="2.13.0+cu126",
-                version=types.SimpleNamespace(cuda="12.6"),
+                __version__="2.11.0+cu130",
+                version=types.SimpleNamespace(cuda="13.0"),
                 cuda=AvailableCuda(),
                 ones=ones,
             ),
@@ -86,7 +86,7 @@ class RuntimeProbeTests(unittest.TestCase):
 
         self.assertFalse(report.ok)
         self.assertEqual("release_runtime", report.stage)
-        self.assertIn("CUDA 13.0", report.message)
+        self.assertIn("CUDA 12.8", report.message)
         self.assertEqual("NVIDIA GeForce RTX 3070", report.details["device"])
         self.assertEqual([8, 6], report.details["capability"])
         self.assertEqual(0, report.details["device_index"])
@@ -158,8 +158,8 @@ class RuntimeProbeTests(unittest.TestCase):
             report = probe_gpu_runtime(
                 root,
                 torch_module=types.SimpleNamespace(
-                    __version__="2.13.0+cu130",
-                    version=types.SimpleNamespace(cuda="13.0"),
+                    __version__="2.11.0+cu128",
+                    version=types.SimpleNamespace(cuda="12.8"),
                     cuda=SupportedCuda(),
                     ones=ones,
                 ),

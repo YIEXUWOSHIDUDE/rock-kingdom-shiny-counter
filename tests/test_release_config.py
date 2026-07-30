@@ -3,6 +3,7 @@ from pathlib import Path
 
 from shiny_counter import __version__
 from shiny_counter.gpu_policy import (
+    EXPECTED_CUDA_TAG,
     EXPECTED_TORCH_VERSION,
     EXPECTED_TORCHVISION_VERSION,
 )
@@ -35,11 +36,11 @@ class ReleaseConfigurationTests(unittest.TestCase):
             cuda_requirements,
         )
         self.assertIn(
-            f"torch=={EXPECTED_TORCH_VERSION}+cu130",
+            f"torch=={EXPECTED_TORCH_VERSION}+{EXPECTED_CUDA_TAG}",
             locked_requirements,
         )
         self.assertIn(
-            f"torchvision=={EXPECTED_TORCHVISION_VERSION}+cu130",
+            f"torchvision=={EXPECTED_TORCHVISION_VERSION}+{EXPECTED_CUDA_TAG}",
             locked_requirements,
         )
         self.assertIn(

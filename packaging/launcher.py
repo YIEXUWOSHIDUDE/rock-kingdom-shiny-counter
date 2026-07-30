@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import multiprocessing
-import subprocess
 import sys
 from pathlib import Path
 
@@ -21,13 +20,17 @@ def _probe_runtime(destination: Path) -> int:
     try:
         import easyocr
         import torch
+        from shiny_counter.nvidia import query_nvidia_gpu
+
+        nvidia_info = query_nvidia_gpu()
 
         report = probe_gpu_runtime(
             model_root,
             torch_module=torch,
             easyocr_module=easyocr,
             probe_image_path=bundle_root / "ocr-probe" / "ocr-probe.png",
-            driver_version=_nvidia_driver_version(),
+            driver_version=nvidia_info.driver_version if nvidia_info else "",
+            gpu_name=nvidia_info.name if nvidia_info else "",
         )
     except Exception as error:
         report = RuntimeProbeReport(
@@ -37,28 +40,6 @@ def _probe_runtime(destination: Path) -> int:
             details={"error_type": type(error).__name__},
         )
     return write_runtime_probe_report(destination, report)
-
-
-def _nvidia_driver_version() -> str:
-    try:
-        process = subprocess.run(
-            [
-                "nvidia-smi.exe",
-                "--query-gpu=driver_version",
-                "--format=csv,noheader",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        if process.returncode == 0:
-            return process.stdout.splitlines()[0].strip()
-    except (OSError, subprocess.SubprocessError, IndexError):
-        pass
-    return ""
-
 
 def _probe_package(destination: Path) -> int:
     bundle_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))

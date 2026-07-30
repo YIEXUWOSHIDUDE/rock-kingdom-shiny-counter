@@ -12,7 +12,7 @@
 
 - Windows 10 22H2 或 Windows 11（64 位）
 - NVIDIA GeForce RTX 20/30/40/50 系显卡，CUDA 计算能力不低于 7.5
-- NVIDIA Windows 驱动 580.88 或更高版本
+- NVIDIA Windows 驱动 570.65 或更高版本
 - 至少 4 GB 显存、8 GB 内存，建议 16 GB 内存
 - 安装或覆盖更新时至少预留 5 GB 可用磁盘空间；安装器直接从内嵌载荷解压，不再额外复制约 2 GB 临时压缩包
 
@@ -22,7 +22,7 @@
 
 ## 源代码环境与安装
 
-- 64 位 Python 3.13 或 3.14
+- 64 位 Python 3.13
 - 洛克王国使用窗口化或无边框窗口模式
 
 如果你安装过旧的模板识别版，建议先删除旧 `.venv`，再按下列步骤重建环境，避免 `opencv-python` 与 `opencv-python-headless` 同时存在。原有 `%APPDATA%\RockKingdomShinyCounter\data.json` 可以继续使用。
@@ -36,7 +36,7 @@ py -3.13 -m venv .venv
 python -m pip install --upgrade pip
 ```
 
-从 PyTorch 官方 CUDA 13.0 索引安装固定版本，然后继续安装其余依赖：
+从 PyTorch 官方 CUDA 12.8 索引安装固定版本，然后继续安装其余依赖：
 
 ```powershell
 python -m pip install -r requirements-cuda.txt
@@ -45,7 +45,7 @@ python -c "import torch; print('CUDA available:', torch.cuda.is_available(), 'CU
 python -m shiny_counter
 ```
 
-必须输出 `CUDA available: True`。RTX 50 系还必须在架构列表中看到 `sm_120`；如果缺失，请确认安装的是 CUDA 13.0 构建。
+必须输出 `CUDA available: True`。RTX 50 系还必须在架构列表中看到 `sm_120`；如果缺失，请确认安装的是 CUDA 12.8 构建。
 
 完成上述安装后，可以直接双击 `run.bat`。脚本会优先使用项目内的 `.venv`。
 

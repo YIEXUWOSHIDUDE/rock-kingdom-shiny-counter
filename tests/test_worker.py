@@ -11,11 +11,47 @@ import numpy as np
 from PySide6.QtCore import Qt
 
 from shiny_counter.capture import WindowBinding
+from shiny_counter.gpu_policy import GPUCompatibilityError
 from shiny_counter.storage import AppSettings
 from shiny_counter.worker import RecognitionWorker, ocr_result_status_code
 
 
 class RecognitionWorkerTests(unittest.TestCase):
+    def test_gpu_compatibility_error_is_short_and_actionable_in_the_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            settings = AppSettings()
+            binding = WindowBinding(
+                hwnd=100,
+                pid=42,
+                class_name="NRCGameWindow",
+                process_path=r"C:\Games\NRC-Win64-Shipping.exe",
+                title="洛克王国：世界",
+                width=2560,
+                height=1600,
+            )
+            worker = RecognitionWorker(settings, Path(directory))
+            messages: list[str] = []
+            worker.stopped_with_error.connect(messages.append)
+
+            worker._report_error(
+                code="CUDA_DRIVER_TOO_OLD",
+                stage="ocr_initialization",
+                message="GPU OCR 兼容性检查失败",
+                error=GPUCompatibilityError(
+                    "CUDA_DRIVER_TOO_OLD",
+                    "识别未启动：RTX 4070 驱动 566.36 过旧，请升级到 570.65 或更高。",
+                ),
+                binding=binding,
+            )
+
+            self.assertEqual(
+                [
+                    "[CUDA_DRIVER_TOO_OLD] 识别未启动：RTX 4070 驱动 "
+                    "566.36 过旧，请升级到 570.65 或更高。"
+                ],
+                messages,
+            )
+
     def test_ocr_result_status_codes_distinguish_pipeline_outcomes(self) -> None:
         self.assertEqual("OCR_NO_TEXT", ocr_result_status_code("", False))
         self.assertEqual(
