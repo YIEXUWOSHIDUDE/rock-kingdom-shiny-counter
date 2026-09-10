@@ -14,9 +14,10 @@ from typing import Any, Callable, Iterable, Mapping
 
 from .gpu_policy import validate_cuda_device
 from .nvidia import query_nvidia_gpu
+from .recognition_profile import CURRENT_RECOGNITION_PROFILE, RecognitionProfile
 
 
-NOTIFICATION_BANNER_REGION = (0.28, 0.10, 0.72, 0.27)
+NOTIFICATION_BANNER_REGION = CURRENT_RECOGNITION_PROFILE.region
 MODEL_LOCK_PATH = Path(
     getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[1])
 ) / "ocr-models.lock.json"
@@ -144,16 +145,24 @@ def normalize_text(text: str) -> str:
     return re.sub(r"\s+", "", normalized)
 
 
-def crop_notification_banner(frame: Any) -> Any:
+def crop_notification_banner(
+    frame: Any,
+    profile: RecognitionProfile | None = None,
+) -> Any:
     """Crop the top-centre notification banner using resolution-independent ratios."""
     height, width = frame.shape[:2]
-    left, top, crop_width, crop_height = notification_banner_rect(width, height)
+    left, top, crop_width, crop_height = notification_banner_rect(width, height, profile)
     return frame[top : top + crop_height, left : left + crop_width]
 
 
-def notification_banner_rect(width: int, height: int) -> tuple[int, int, int, int]:
+def notification_banner_rect(
+    width: int,
+    height: int,
+    profile: RecognitionProfile | None = None,
+) -> tuple[int, int, int, int]:
     """Return the OCR banner rectangle as left, top, width, and height."""
-    left_ratio, top_ratio, right_ratio, bottom_ratio = NOTIFICATION_BANNER_REGION
+    target = CURRENT_RECOGNITION_PROFILE if profile is None else profile
+    left_ratio, top_ratio, right_ratio, bottom_ratio = target.region
     left = int(width * left_ratio)
     top = int(height * top_ratio)
     right = int(width * right_ratio)
@@ -162,7 +171,11 @@ def notification_banner_rect(width: int, height: int) -> tuple[int, int, int, in
 
 
 class OCRKeywordMatcher:
-    def __init__(self, keywords: Iterable[str], min_confidence: float = 0.55) -> None:
+    def __init__(
+        self,
+        keywords: Iterable[str],
+        min_confidence: float = CURRENT_RECOGNITION_PROFILE.min_confidence,
+    ) -> None:
         cleaned = [keyword.strip() for keyword in keywords if keyword.strip()]
         if not cleaned:
             raise ValueError("至少需要一个 OCR 关键词")

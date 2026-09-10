@@ -22,6 +22,11 @@ class PresenceGate:
         self._enter_streak = 0
         self._exit_streak = 0
 
+    def interrupt(self) -> None:
+        """Forget partial evidence across a capture gap, preserving counted state."""
+        self._enter_streak = 0
+        self._exit_streak = 0
+
     def observe(self, present: bool) -> bool:
         if self._armed:
             self._enter_streak = self._enter_streak + 1 if present else 0

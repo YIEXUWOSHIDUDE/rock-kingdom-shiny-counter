@@ -1,5 +1,9 @@
 # Repository instructions
 
+## Project rules
+
+开始本项目任务前，完整阅读根目录 `AGENTS.local.md`。它保存本仓库人工维护的工作规则；在不违反系统、开发者和用户当前明确要求的前提下，项目具体规则优先于通用模板。不要通过远端 bootstrap 自动覆盖这两份文件。
+
 ## Agent skills
 
 ### Issue tracker

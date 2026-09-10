@@ -4,11 +4,13 @@ import types
 import unittest
 import zipfile
 from pathlib import Path
+from dataclasses import replace
 from unittest.mock import patch
 
 import numpy as np
 
 from shiny_counter.gpu_policy import GPUCompatibilityError, NvidiaGPUInfo
+from shiny_counter.recognition_profile import CURRENT_RECOGNITION_PROFILE
 from shiny_counter.ocr import (
     EasyOCREngine,
     OCRError,
@@ -23,6 +25,26 @@ from shiny_counter.ocr import (
 
 
 class OCRKeywordMatcherTests(unittest.TestCase):
+    def test_crop_and_preview_rectangle_follow_the_same_profile_region(self) -> None:
+        frame = np.arange(20 * 40 * 3).reshape((20, 40, 3))
+        cases = [
+            ((0.0, 0.25, 0.5, 0.75), (0, 5, 20, 10)),
+            ((0.5, 0.0, 1.0, 0.25), (20, 0, 20, 5)),
+        ]
+        for region, expected_rect in cases:
+            with self.subTest(region=region):
+                profile = replace(CURRENT_RECOGNITION_PROFILE, region=region)
+
+                rect = notification_banner_rect(40, 20, profile)
+                cropped = crop_notification_banner(frame, profile)
+
+                self.assertEqual(rect, expected_rect)
+                left, top, width, height = expected_rect
+                np.testing.assert_array_equal(
+                    cropped,
+                    frame[top:top + height, left:left + width],
+                )
+
     def test_notification_banner_crop_uses_relative_coordinates(self) -> None:
         frame = np.zeros((1170, 2532, 3), dtype=np.uint8)
 
