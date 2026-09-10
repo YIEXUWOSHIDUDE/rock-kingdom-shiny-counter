@@ -2,6 +2,7 @@
     [string]$ModelDirectory = "$env:APPDATA\RockKingdomShinyCounter\ocr-models",
     [string]$VenvDirectory = "release\.venv-cuda128",
     [string]$WheelhouseDirectory = "release\wheelhouse-win-py313-cu128",
+    [string]$ArtifactDirectory = "release",
     [switch]$ReuseEnvironment,
     [switch]$SkipTests,
     [switch]$SkipLocalGpuProbe
@@ -107,9 +108,10 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
     throw "发布 Python 不存在：$Python"
 }
 
-$BuildRoot = Reset-ProjectDirectory (Join-Path $Root "release\build")
-$StagingRoot = Reset-ProjectDirectory (Join-Path $Root "release\staging")
-$OutputRoot = Reset-ProjectDirectory (Join-Path $Root "release\out")
+$ArtifactRoot = [IO.Path]::GetFullPath((Join-Path $Root $ArtifactDirectory))
+$BuildRoot = Reset-ProjectDirectory (Join-Path $ArtifactRoot "build")
+$StagingRoot = Reset-ProjectDirectory (Join-Path $ArtifactRoot "staging")
+$OutputRoot = Reset-ProjectDirectory (Join-Path $ArtifactRoot "out")
 $BuildEnvironment = Join-Path $OutputRoot "build-environment.json"
 
 Invoke-Checked "验证 CUDA 12.8 wheel、目标架构与模型哈希" {

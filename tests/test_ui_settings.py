@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 from shiny_counter.storage import AppData, DataStore
+from shiny_counter.recognition_profile import CURRENT_RECOGNITION_PROFILE
 from shiny_counter.ui import OverlayWindow, SettingsDialog, compact_recognition_status
 
 
@@ -23,6 +24,19 @@ class SettingsBehaviorTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+
+    def test_settings_show_s4_profile_and_current_default_keyword(self):
+        dialog = SettingsDialog(AppData())
+        try:
+            self.assertEqual(dialog.ocr_keywords.text(), CURRENT_RECOGNITION_PROFILE.keywords[0])
+            self.assertIn(CURRENT_RECOGNITION_PROFILE.keywords[0], dialog.ocr_keywords.placeholderText())
+            self.assertIn(CURRENT_RECOGNITION_PROFILE.name, [label.text() for label in dialog.findChildren(QLabel)])
+        finally:
+            dialog.close()
+
+    def test_matching_a_still_visible_banner_does_not_claim_another_count(self):
+        self.assertNotIn("+1", compact_recognition_status("[OCR_MATCH] 匹配横幅"))
+        self.assertIn("+1", compact_recognition_status("[COUNTED] 计数已触发"))
 
     def test_recognition_status_hides_diagnostics_but_keeps_useful_outcome(self) -> None:
         self.assertEqual(

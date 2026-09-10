@@ -2,13 +2,119 @@ import json
 import tempfile
 import unittest
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 
 from shiny_counter.capture import WindowBinding
-from shiny_counter.storage import AppSettings, DataCorruptError, DataStore
+from shiny_counter.storage import AppData, AppSettings, DataCorruptError, DataStore
 
 
 class DataStoreTests(unittest.TestCase):
+    def test_loading_an_unknown_profile_reports_it_without_altering_saved_data(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = DataStore(Path(directory))
+            payload = AppData().to_dict()
+            payload["settings"]["recognition_profile_id"] = "future-season"
+            encoded = json.dumps(payload, ensure_ascii=False)
+            store.path.write_text(encoded, encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "unknown recognition profile.*future-season"):
+                store.load()
+
+            self.assertEqual(store.path.read_text(encoding="utf-8"), encoded)
+            self.assertEqual(list(store.root.glob("data.corrupt-*")), [])
+
+    def test_migrated_profile_is_tagged_and_stable_across_repeated_serialization(self) -> None:
+        payload = AppData().to_dict()
+        payload["settings"].pop("recognition_profile_id")
+        payload["settings"]["ocr_keywords"] = ["写进了童话里"]
+
+        first = AppData.from_dict(payload).to_dict()
+        second = AppData.from_dict(json.loads(json.dumps(first))).to_dict()
+
+        self.assertEqual(first, second)
+        self.assertEqual(first["settings"]["recognition_profile_id"], AppSettings().recognition_profile_id)
+        self.assertEqual(second["settings"]["ocr_keywords"], ["划破天幕坠落"])
+
+    def test_custom_keywords_are_preserved_in_legacy_and_tagged_settings(self) -> None:
+        cases = [
+            (False, ["我的关键词"]),
+            (False, ["写进了童话里", "我的关键词"]),
+            (False, [" 写进了童话里 "]),
+            (True, ["写进了童话里"]),
+        ]
+        for tagged, keywords in cases:
+            with self.subTest(tagged=tagged, keywords=keywords):
+                payload = AppData().to_dict()
+                if not tagged:
+                    payload["settings"].pop("recognition_profile_id")
+                payload["settings"].update(
+                    ocr_keywords=keywords,
+                    ocr_min_confidence=0.63,
+                    ocr_interval_ms=1200,
+                    ocr_enter_frames=2,
+                    ocr_exit_frames=3,
+                )
+
+                restored = AppData.from_dict(payload).settings
+
+                self.assertEqual(restored.ocr_keywords, keywords)
+                self.assertEqual(restored.recognition_profile().keywords, tuple(keywords))
+                self.assertEqual(restored.ocr_min_confidence, 0.63)
+                self.assertEqual(restored.ocr_interval_ms, 1200)
+                self.assertEqual(restored.ocr_enter_frames, 2)
+                self.assertEqual(restored.ocr_exit_frames, 3)
+
+    def test_unknown_recognition_profile_is_rejected_without_rewriting_input(self) -> None:
+        for profile_id in ("future-season", "", None):
+            with self.subTest(profile_id=profile_id):
+                payload = AppData().to_dict()
+                payload["settings"]["recognition_profile_id"] = profile_id
+                payload["settings"]["ocr_keywords"] = ["我的关键词"]
+                original = deepcopy(payload)
+
+                with self.assertRaisesRegex(ValueError, "unknown recognition profile"):
+                    AppData.from_dict(payload)
+
+                self.assertEqual(payload, original)
+
+    def test_missing_recognition_fields_use_the_same_defaults_as_new_settings(self) -> None:
+        payload = AppData().to_dict()
+        payload["settings"] = {}
+
+        restored = AppData.from_dict(payload).settings
+
+        self.assertEqual(restored.ocr_keywords, ["划破天幕坠落"])
+        self.assertEqual(restored.recognition_profile(), AppSettings().recognition_profile())
+
+    def test_legacy_default_keyword_migrates_without_changing_other_data(self) -> None:
+        data = AppData()
+        data.counter.increment(source="manual")
+        data.counter.reset()
+        data.counter.increment(source="auto", score=0.91)
+        payload = data.to_dict()
+        payload["settings"].pop("recognition_profile_id", None)
+        payload["settings"].update(
+            ocr_keywords=["写进了童话里"],
+            ocr_min_confidence=0.79,
+            ocr_interval_ms=800,
+            ocr_enter_frames=3,
+            ocr_exit_frames=4,
+            opacity=0.70,
+        )
+        original = deepcopy(payload)
+
+        migrated = AppData.from_dict(payload)
+
+        self.assertEqual(migrated.settings.ocr_keywords, ["划破天幕坠落"])
+        self.assertEqual(migrated.settings.ocr_min_confidence, 0.79)
+        self.assertEqual(migrated.settings.ocr_interval_ms, 800)
+        self.assertEqual(migrated.settings.ocr_enter_frames, 3)
+        self.assertEqual(migrated.settings.ocr_exit_frames, 4)
+        self.assertEqual(migrated.settings.opacity, 0.70)
+        self.assertEqual(migrated.to_dict()["counter"], original["counter"])
+        self.assertEqual(payload, original)
+
     def test_window_binding_survives_a_restart(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = DataStore(Path(directory))

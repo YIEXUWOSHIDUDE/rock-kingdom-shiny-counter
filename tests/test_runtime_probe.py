@@ -11,6 +11,7 @@ from shiny_counter.runtime_probe import (
     probe_gpu_runtime,
     write_runtime_probe_report,
 )
+from shiny_counter.probe_asset import OCR_PROBE_EXPECTED_FRAGMENT
 
 
 class RuntimeProbeTests(unittest.TestCase):
@@ -150,7 +151,7 @@ class RuntimeProbeTests(unittest.TestCase):
 
             def readtext(frame: object, **read_options: object) -> list[object]:
                 calls.append(("readtext", frame, read_options.get("detail")))
-                return [([], "写进了童话里", 0.99)]
+                return [([], OCR_PROBE_EXPECTED_FRAGMENT, 0.99)]
 
             return types.SimpleNamespace(device="cuda", readtext=readtext)
 

@@ -2,16 +2,16 @@ from __future__ import annotations
 
 import threading
 import time
+from copy import deepcopy
 from dataclasses import asdict
 
 from PySide6.QtCore import QThread, Signal
 
 from .capture import CaptureError, Win32Capture, WindowBinding
 from .diagnostics import DiagnosticLog
-from .detection import PresenceGate
-from .frame_buffer import NotificationFrameBuffer
 from .gpu_policy import GPUCompatibilityError
-from .ocr import EasyOCREngine, OCRError, OCRKeywordMatcher, crop_notification_banner
+from .ocr import EasyOCREngine, OCRError
+from .recognition import BannerRecognitionStream
 from .storage import AppSettings
 
 
@@ -32,9 +32,10 @@ class RecognitionWorker(QThread):
 
     def __init__(self, settings: AppSettings, data_root) -> None:
         super().__init__()
-        self.settings = settings
+        self.settings = deepcopy(settings)
         self.data_root = data_root
         self._paused = threading.Event()
+        self._stream: BannerRecognitionStream | None = None
         self.diagnostics = DiagnosticLog(data_root)
         self._last_capture_error: str | None = None
 
@@ -43,6 +44,8 @@ class RecognitionWorker(QThread):
             self._paused.set()
         else:
             self._paused.clear()
+        if self._stream is not None:
+            self._stream.set_paused(paused)
 
     def run(self) -> None:
         binding = self.settings.window_binding()
@@ -118,7 +121,9 @@ class RecognitionWorker(QThread):
             "[GPU_CHECKING] 正在检查 NVIDIA GPU 并准备中文 OCR 模型",
             -1.0,
         )
-        frames = NotificationFrameBuffer()
+        frames = BannerRecognitionStream(self.settings)
+        self._stream = frames
+        frames.set_paused(self._paused.is_set())
         capture_stop = threading.Event()
         capture_ready = threading.Event()
         capture_init_errors: list[BaseException] = []
@@ -165,14 +170,6 @@ class RecognitionWorker(QThread):
         )
         try:
             engine = EasyOCREngine(self.data_root / "ocr-models")
-            matcher = OCRKeywordMatcher(
-                self.settings.ocr_keywords,
-                min_confidence=self.settings.ocr_min_confidence,
-            )
-            gate = PresenceGate(
-                enter_frames=self.settings.ocr_enter_frames,
-                exit_frames=self.settings.ocr_exit_frames,
-            )
         except GPUCompatibilityError as error:
             capture_stop.set()
             frames.close()
@@ -205,7 +202,6 @@ class RecognitionWorker(QThread):
         try:
             while not self.isInterruptionRequested():
                 if self._paused.is_set():
-                    frames.clear()
                     self.status_changed.emit("[PAUSED] 已暂停", -1.0)
                     self.msleep(150)
                     continue
@@ -215,10 +211,13 @@ class RecognitionWorker(QThread):
                 scan_started = time.monotonic()
                 try:
                     texts = engine.read(sample.frame)
-                    joined = " | ".join(item.text for item in texts)
+                    decision = frames.observe(sample, texts)
+                    if not decision.accepted or self.isInterruptionRequested():
+                        continue
+                    joined = decision.text
                     self.ocr_text_changed.emit(joined)
-                    match = matcher.match(texts)
-                    if gate.observe(match is not None):
+                    match = decision.match
+                    if decision.counted:
                         self.detected.emit(match.confidence if match is not None else 1.0)
                 except OCRError as error:
                     self._report_error(
@@ -243,13 +242,14 @@ class RecognitionWorker(QThread):
                         -1.0,
                     )
                 else:
+                    status_code = "COUNTED" if decision.counted else "OCR_MATCH"
                     self.status_changed.emit(
-                        f"[{ocr_result_status_code(joined, True)}] "
+                        f"[{status_code}] "
                         f"匹配“{match.keyword}” · GPU OCR {elapsed_ms} ms"
                         f" · 缓冲 {queue_delay_ms} ms",
                         match.confidence,
                     )
-                remaining_ms = max(0, self.settings.ocr_interval_ms - elapsed_ms)
+                remaining_ms = max(0, frames.profile.interval_ms - elapsed_ms)
                 if remaining_ms:
                     self.msleep(remaining_ms)
         finally:
@@ -268,7 +268,7 @@ class RecognitionWorker(QThread):
     def _capture_loop(
         self,
         binding: WindowBinding,
-        frames: NotificationFrameBuffer,
+        frames: BannerRecognitionStream,
         stop: threading.Event,
         ready: threading.Event,
         init_errors: list[BaseException],
@@ -284,7 +284,7 @@ class RecognitionWorker(QThread):
             try:
                 frame, _ = capture.capture_client(expected_size)
                 frames.offer(
-                    crop_notification_banner(frame),
+                    frame,
                     captured_at=time.monotonic(),
                 )
             except Exception as error:
@@ -301,15 +301,16 @@ class RecognitionWorker(QThread):
                     frame, _ = capture.capture_client(expected_size)
                     self._last_capture_error = None
                     frames.offer(
-                        crop_notification_banner(frame),
+                        frame,
                         captured_at=time.monotonic(),
                     )
                 except CaptureError as error:
-                    frames.clear()
+                    frames.invalidate()
                     self._report_capture_unavailable(error, capture.binding)
                     stop.wait(0.5)
                     continue
                 except Exception as error:
+                    frames.invalidate()
                     self._report_error(
                         code="CAPTURE_LOOP_FAILED",
                         stage="capture_loop",

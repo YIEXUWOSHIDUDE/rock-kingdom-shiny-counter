@@ -41,6 +41,7 @@ from .diagnostics import DiagnosticLog
 from .hotkeys import GlobalHotkeyThread
 from .model import HistoryEvent, PityRound
 from .ocr import notification_banner_rect
+from .recognition_profile import CURRENT_RECOGNITION_PROFILE, RecognitionProfile, get_recognition_profile
 from .storage import AppData, DataStore
 from .worker import RecognitionWorker
 
@@ -114,7 +115,8 @@ def compact_recognition_status(message: str) -> str:
         "CAPTURE_READY": "已找到并截图游戏窗口，正在启动 GPU OCR…",
         "OCR_READY": "自动计数已就绪，等待结算横幅",
         "OCR_NO_TEXT": "识别正常，等待结算横幅",
-        "OCR_MATCH": "已识别结算横幅，计数 +1",
+        "OCR_MATCH": "已识别横幅，等待本次提示结束",
+        "COUNTED": "已识别结算横幅，计数 +1",
         "CAPTURE_UNAVAILABLE": "游戏窗口暂时无法截图，请恢复游戏窗口",
         "PAUSED": "自动识别已暂停",
     }
@@ -183,7 +185,8 @@ class SettingsDialog(QDialog):
         self.pity.setRange(1, 1_000_000)
         self.pity.setValue(data.counter.pity_limit)
         self.ocr_keywords = QLineEdit("，".join(data.settings.ocr_keywords))
-        self.ocr_keywords.setPlaceholderText("例如：写进了童话里")
+        profile = get_recognition_profile(data.settings.recognition_profile_id)
+        self.ocr_keywords.setPlaceholderText("例如：" + "，".join(profile.keywords))
         self.ocr_confidence = QDoubleSpinBox()
         self.ocr_confidence.setRange(0.10, 1.0)
         self.ocr_confidence.setDecimals(2)
@@ -201,6 +204,7 @@ class SettingsDialog(QDialog):
         self.opacity.setValue(data.settings.opacity)
         form.addRow("目标名称", self.target)
         form.addRow("保底次数", self.pity)
+        form.addRow("识别方案", QLabel(profile.name))
         form.addRow("OCR 关键词", self.ocr_keywords)
         form.addRow("OCR 最低置信度", self.ocr_confidence)
         form.addRow("OCR 扫描间隔", self.ocr_interval)
@@ -382,6 +386,8 @@ class CapturePreviewDialog(QDialog):
         frame,
         binding: WindowBinding,
         parent: QWidget | None = None,
+        *,
+        profile: RecognitionProfile | None = None,
     ) -> None:
         super().__init__(parent)
         self.setStyleSheet(DIALOG_STYLE)
@@ -402,7 +408,8 @@ class CapturePreviewDialog(QDialog):
             int(pixels.strides[0]),
             image_format,
         ).copy()
-        left, top, crop_width, crop_height = notification_banner_rect(width, height)
+        profile = profile or CURRENT_RECOGNITION_PROFILE
+        left, top, crop_width, crop_height = notification_banner_rect(width, height, profile)
         painter = QPainter(image)
         painter.setPen(QPen(Qt.GlobalColor.red, max(2, width // 500)))
         painter.drawRect(left, top, crop_width - 1, crop_height - 1)
@@ -422,7 +429,7 @@ class CapturePreviewDialog(QDialog):
         layout.addWidget(preview, 1)
         self.hint_label = QLabel(
             f"已捕获：{binding.title} · {width}×{height}。"
-            "红框是实际送入 GPU OCR 的区域。"
+            f"{profile.name}：红框是实际送入 GPU OCR 的区域。"
         )
         self.hint_label.setWordWrap(True)
         layout.addWidget(self.hint_label)
@@ -929,7 +936,9 @@ class OverlayWindow(QWidget):
             return
         self.data.settings.set_window_binding(binding)
         self._save()
-        CapturePreviewDialog(frame, binding, self).exec()
+        CapturePreviewDialog(
+            frame, binding, self, profile=self.data.settings.recognition_profile()
+        ).exec()
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(

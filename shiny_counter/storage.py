@@ -4,13 +4,20 @@ import json
 import os
 import shutil
 import zipfile
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .capture import WindowBinding
 from .model import CounterState, HistoryEvent, PityRound
+from .recognition_profile import (
+    CURRENT_RECOGNITION_PROFILE,
+    RecognitionProfile,
+    UnknownRecognitionProfileError,
+    get_recognition_profile,
+    migrate_recognition_settings,
+)
 
 
 DATA_VERSION = 1
@@ -44,11 +51,14 @@ class AppSettings:
     window_pid: int = 0
     window_class_name: str = ""
     window_process_path: str = ""
-    ocr_keywords: list[str] = field(default_factory=lambda: ["写进了童话里"])
-    ocr_min_confidence: float = 0.55
-    ocr_interval_ms: int = 200
-    ocr_enter_frames: int = 1
-    ocr_exit_frames: int = 2
+    recognition_profile_id: str = CURRENT_RECOGNITION_PROFILE.profile_id
+    ocr_keywords: list[str] = field(
+        default_factory=lambda: list(CURRENT_RECOGNITION_PROFILE.keywords)
+    )
+    ocr_min_confidence: float = CURRENT_RECOGNITION_PROFILE.min_confidence
+    ocr_interval_ms: int = CURRENT_RECOGNITION_PROFILE.interval_ms
+    ocr_enter_frames: int = CURRENT_RECOGNITION_PROFILE.enter_frames
+    ocr_exit_frames: int = CURRENT_RECOGNITION_PROFILE.exit_frames
     opacity: float = 0.92
     click_through: bool = False
     position_locked: bool = True
@@ -59,6 +69,16 @@ class AppSettings:
             "disable_click_through": DEFAULT_DISABLE_CLICK_THROUGH_HOTKEY,
         }
     )
+
+    def recognition_profile(self) -> RecognitionProfile:
+        return replace(
+            get_recognition_profile(self.recognition_profile_id),
+            keywords=tuple(self.ocr_keywords),
+            min_confidence=self.ocr_min_confidence,
+            interval_ms=self.ocr_interval_ms,
+            enter_frames=self.ocr_enter_frames,
+            exit_frames=self.ocr_exit_frames,
+        )
 
     def active_hotkeys(self) -> dict[str, str]:
         if not self.hotkeys_enabled:
@@ -90,16 +110,9 @@ class AppSettings:
         )
 
     def validate(self) -> None:
+        self.recognition_profile()
         if not 0.30 <= self.opacity <= 1:
             raise ValueError("opacity must be between 0.30 and 1")
-        if not 0 <= self.ocr_min_confidence <= 1:
-            raise ValueError("OCR confidence must be between 0 and 1")
-        if not 200 <= self.ocr_interval_ms <= 5000:
-            raise ValueError("OCR interval must be between 200 and 5000 ms")
-        if self.ocr_enter_frames < 1 or self.ocr_exit_frames < 1:
-            raise ValueError("OCR frame counts must be positive")
-        if not any(keyword.strip() for keyword in self.ocr_keywords):
-            raise ValueError("at least one OCR keyword is required")
         if self.client_size is not None and (
             len(self.client_size) != 2 or self.client_size[0] < 1 or self.client_size[1] < 1
         ):
@@ -137,6 +150,7 @@ class AppData:
         settings_raw = raw.get("settings")
         if not isinstance(counter_raw, dict) or not isinstance(settings_raw, dict):
             raise ValueError("counter and settings objects are required")
+        settings_raw = migrate_recognition_settings(settings_raw)
 
         events = [HistoryEvent(**event) for event in counter_raw.get("history", [])]
         rounds = [PityRound(**round_data) for round_data in counter_raw.get("rounds", [])]
@@ -176,11 +190,12 @@ class AppData:
             window_pid=int(settings_raw.get("window_pid", 0)),
             window_class_name=str(settings_raw.get("window_class_name", "")),
             window_process_path=str(settings_raw.get("window_process_path", "")),
-            ocr_keywords=[str(item) for item in settings_raw.get("ocr_keywords", ["写进了童话里"])],
-            ocr_min_confidence=float(settings_raw.get("ocr_min_confidence", 0.55)),
-            ocr_interval_ms=int(settings_raw.get("ocr_interval_ms", 200)),
-            ocr_enter_frames=int(settings_raw.get("ocr_enter_frames", 1)),
-            ocr_exit_frames=int(settings_raw.get("ocr_exit_frames", 2)),
+            recognition_profile_id=str(settings_raw["recognition_profile_id"]),
+            ocr_keywords=[str(item) for item in settings_raw["ocr_keywords"]],
+            ocr_min_confidence=float(settings_raw["ocr_min_confidence"]),
+            ocr_interval_ms=int(settings_raw["ocr_interval_ms"]),
+            ocr_enter_frames=int(settings_raw["ocr_enter_frames"]),
+            ocr_exit_frames=int(settings_raw["ocr_exit_frames"]),
             opacity=float(settings_raw.get("opacity", 0.92)),
             click_through=bool(settings_raw.get("click_through", False)),
             position_locked=bool(settings_raw.get("position_locked", True)),
@@ -204,6 +219,8 @@ class DataStore:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             return AppData.from_dict(raw)
+        except UnknownRecognitionProfileError:
+            raise
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
             timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             backup = self.root / f"data.corrupt-{timestamp}.json"
