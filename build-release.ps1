@@ -134,13 +134,29 @@ Invoke-Checked "生成固定中文 OCR 探针图片" {
 }
 $env:RKSC_MODEL_DIR = $ModelDirectory
 $env:RKSC_PROBE_IMAGE = $ProbeImage
-Invoke-Checked "构建 one-folder GPU 应用" {
-    & $Python -m PyInstaller `
-        --noconfirm `
-        --clean `
-        --workpath $BuildRoot `
-        --distpath $StagingRoot `
-        packaging\RockKingdomShinyCounter.spec
+# Do not collect unrelated Poppler/libheif DLLs from the host's tool PATH.
+# In particular, their icuuc.dll can shadow Windows ICU required by Qt.
+$OriginalBuildPath = $env:PATH
+$BasePythonDirectory = (& $Python -c "import sys; print(sys.base_prefix)").Trim()
+if ($LASTEXITCODE -ne 0) { throw "无法获取发布 Python 的基础目录" }
+try {
+    $env:PATH = @(
+        (Split-Path -Parent $Python),
+        $BasePythonDirectory,
+        (Join-Path $env:WINDIR 'System32'),
+        $env:WINDIR,
+        (Join-Path $env:WINDIR 'System32\Wbem')
+    ) -join ';'
+    Invoke-Checked "在隔离的 DLL 搜索路径中构建 one-folder GPU 应用" {
+        & $Python -m PyInstaller `
+            --noconfirm `
+            --clean `
+            --workpath $BuildRoot `
+            --distpath $StagingRoot `
+            packaging\RockKingdomShinyCounter.spec
+    }
+} finally {
+    $env:PATH = $OriginalBuildPath
 }
 
 $AppDirectory = Join-Path $StagingRoot "RockKingdomShinyCounter"
