@@ -13,6 +13,9 @@ from .runtime_probe import RuntimeProbeReport
 
 REQUIRED_FROZEN_MODULES = (
     "PySide6",
+    "PySide6.QtCore",
+    "PySide6.QtGui",
+    "PySide6.QtWidgets",
     "cv2",
     "easyocr",
     "mss",

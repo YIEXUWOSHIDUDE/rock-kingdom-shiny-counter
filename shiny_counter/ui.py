@@ -558,7 +558,7 @@ class OverlayWindow(QWidget):
         self.tray_menu.addAction(self.tray_restore_action)
         self.tray_menu.addSeparator()
         quit_action = QAction("退出", self)
-        quit_action.triggered.connect(QApplication.quit)
+        quit_action.triggered.connect(self.close)
         self.tray_menu.addAction(quit_action)
 
         if not self.system_tray_available:
@@ -651,6 +651,8 @@ class OverlayWindow(QWidget):
         if self.tray_icon is not None:
             self.tray_icon.hide()
         event.accept()
+        # Tool windows do not quit the application when their last window closes.
+        QApplication.quit()
 
     def _save(self) -> None:
         try:
