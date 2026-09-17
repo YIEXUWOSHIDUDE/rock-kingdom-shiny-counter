@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import ctypes.wintypes
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -247,6 +248,7 @@ class Win32Capture:
                 height=0,
             )
         self._mss = mss.mss()
+        self.performance = None
 
     def close(self) -> None:
         self._mss.close()
@@ -287,14 +289,37 @@ class Win32Capture:
     def capture_client(
         self, expected_size: tuple[int, int] | None = None
     ) -> tuple[Any, tuple[int, int]]:
+        """Full client preview; continuous recognition uses capture_banner."""
+        return self._capture(expected_size)
+
+    def capture_banner(self, expected_size, profile) -> tuple[Any, tuple[int, int]]:
+        """Capture only the shared ROI, but validate and return original client size."""
+        return self._capture(expected_size, profile=profile)
+
+    def _capture(self, expected_size, *, profile=None) -> tuple[Any, tuple[int, int]]:
         import numpy as np
 
+        started = time.perf_counter()
         _, left, top, width, height = self._geometry(expected_size)
+        shot_width, shot_height = width, height
+        if profile is not None:
+            from .ocr import notification_banner_rect
+
+            dx, dy, shot_width, shot_height = notification_banner_rect(width, height, profile)
+            if shot_width <= 0 or shot_height <= 0:
+                raise CaptureError("游戏窗口过小，横幅截图区域为空")
+            left, top = left + dx, top + dy
         try:
             shot = self._mss.grab(
-                {"left": left, "top": top, "width": width, "height": height}
+                {"left": left, "top": top, "width": shot_width, "height": shot_height}
             )
-            return np.asarray(shot)[:, :, :3].copy(), (width, height)
+            if self.performance is not None:
+                self.performance.timing("window_check_and_grab", time.perf_counter() - started)
+            started = time.perf_counter()
+            frame = np.asarray(shot)[:, :, :3].copy()
+            if self.performance is not None:
+                self.performance.timing("image_conversion", time.perf_counter() - started)
+            return frame, (width, height)
         except Exception as error:
             raise CaptureError(
                 f"窗口截图失败（{type(error).__name__}）：{error}"

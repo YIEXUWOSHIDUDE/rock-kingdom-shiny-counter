@@ -18,9 +18,11 @@ from .storage import AppSettings
 CAPTURE_INTERVAL_SECONDS = 0.05
 
 
-def ocr_result_status_code(recognized_text: str, matched: bool) -> str:
+def ocr_result_status_code(recognized_text: str, matched: bool, *, uncertain: bool = False) -> str:
     if matched:
         return "OCR_MATCH"
+    if uncertain:
+        return "OCR_UNCERTAIN"
     return "OCR_TEXT_NO_MATCH" if recognized_text else "OCR_NO_TEXT"
 
 
@@ -30,7 +32,7 @@ class RecognitionWorker(QThread):
     ocr_text_changed = Signal(str)
     stopped_with_error = Signal(str)
 
-    def __init__(self, settings: AppSettings, data_root) -> None:
+    def __init__(self, settings: AppSettings, data_root, *, performance=None) -> None:
         super().__init__()
         self.settings = deepcopy(settings)
         self.data_root = data_root
@@ -38,6 +40,7 @@ class RecognitionWorker(QThread):
         self._stream: BannerRecognitionStream | None = None
         self.diagnostics = DiagnosticLog(data_root)
         self._last_capture_error: str | None = None
+        self.performance = performance
 
     def set_paused(self, paused: bool) -> None:
         if paused:
@@ -121,7 +124,7 @@ class RecognitionWorker(QThread):
             "[GPU_CHECKING] 正在检查 NVIDIA GPU 并准备中文 OCR 模型",
             -1.0,
         )
-        frames = BannerRecognitionStream(self.settings)
+        frames = BannerRecognitionStream(self.settings, performance=self.performance)
         self._stream = frames
         frames.set_paused(self._paused.is_set())
         capture_stop = threading.Event()
@@ -169,7 +172,10 @@ class RecognitionWorker(QThread):
             -1.0,
         )
         try:
+            init_started = time.perf_counter()
             engine = EasyOCREngine(self.data_root / "ocr-models")
+            if self.performance is not None:
+                self.performance.timing("ocr_initialization", time.perf_counter() - init_started)
         except GPUCompatibilityError as error:
             capture_stop.set()
             frames.close()
@@ -209,8 +215,14 @@ class RecognitionWorker(QThread):
                 if sample is None:
                     continue
                 scan_started = time.monotonic()
+                if self.performance is not None:
+                    self.performance.timing("queue_wait", max(0, scan_started - sample.captured_at))
                 try:
+                    ocr_started = time.perf_counter()
                     texts = engine.read(sample.frame)
+                    if self.performance is not None:
+                        self.performance.timing("ocr_call", time.perf_counter() - ocr_started)
+                        self.performance.event("ocr_calls")
                     decision = frames.observe(sample, texts)
                     if not decision.accepted or self.isInterruptionRequested():
                         continue
@@ -218,6 +230,8 @@ class RecognitionWorker(QThread):
                     self.ocr_text_changed.emit(joined)
                     match = decision.match
                     if decision.counted:
+                        if self.performance is not None:
+                            self.performance.event("counts")
                         self.detected.emit(match.confidence if match is not None else 1.0)
                 except OCRError as error:
                     self._report_error(
@@ -235,7 +249,7 @@ class RecognitionWorker(QThread):
                 )
                 if match is None:
                     preview = joined[:30] if joined else "未识别到文字"
-                    status_code = ocr_result_status_code(joined, False)
+                    status_code = ocr_result_status_code(joined, False, uncertain=decision.uncertain)
                     self.status_changed.emit(
                         f"[{status_code}] OCR {engine.device_label} · {elapsed_ms} ms"
                         f" · 缓冲 {queue_delay_ms} ms：{preview}",
@@ -275,6 +289,7 @@ class RecognitionWorker(QThread):
     ) -> None:
         try:
             capture = Win32Capture(binding)
+            capture.performance = self.performance
         except Exception as error:
             init_errors.append(error)
             ready.set()
@@ -282,11 +297,7 @@ class RecognitionWorker(QThread):
         expected_size = (binding.width, binding.height)
         try:
             try:
-                frame, _ = capture.capture_client(expected_size)
-                frames.offer(
-                    frame,
-                    captured_at=time.monotonic(),
-                )
+                self._capture_offer(capture, expected_size, frames)
             except Exception as error:
                 init_errors.append(error)
                 return
@@ -298,12 +309,8 @@ class RecognitionWorker(QThread):
                     continue
                 started = time.monotonic()
                 try:
-                    frame, _ = capture.capture_client(expected_size)
+                    self._capture_offer(capture, expected_size, frames)
                     self._last_capture_error = None
-                    frames.offer(
-                        frame,
-                        captured_at=time.monotonic(),
-                    )
                 except CaptureError as error:
                     frames.invalidate()
                     self._report_capture_unavailable(error, capture.binding)
@@ -334,3 +341,15 @@ class RecognitionWorker(QThread):
                     error=error,
                     binding=capture.binding,
                 )
+
+    def _capture_offer(self, capture, expected_size, frames) -> None:
+        started = time.perf_counter()
+        frame, _ = capture.capture_banner(expected_size, frames.profile)
+        captured_at = time.monotonic()
+        if self.performance is not None:
+            self.performance.timing("capture_total", time.perf_counter() - started)
+            self.performance.event("captures")
+        started = time.perf_counter()
+        frames.offer_banner(frame, captured_at=captured_at)
+        if self.performance is not None:
+            self.performance.timing("buffer_offer", time.perf_counter() - started)

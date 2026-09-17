@@ -46,6 +46,7 @@ class NotificationFrameBuffer:
         comparison_size: tuple[int, int] = (160, 48),
         clock: Callable[[], float] = time.monotonic,
         minimum_run_samples: int = 2,
+        performance=None,
     ) -> None:
         if candidate_capacity < 1:
             raise ValueError("candidate capacity must be positive")
@@ -67,6 +68,11 @@ class NotificationFrameBuffer:
         self._generation = 0
         self._last_captured_at: float | None = None
         self._condition = threading.Condition()
+        self._performance = performance
+
+    def _dropped(self, reason: str, count: int = 1) -> None:
+        if self._performance is not None and count:
+            self._performance.event(reason, count)
 
     @property
     def pending_candidates(self) -> int:
@@ -106,6 +112,7 @@ class NotificationFrameBuffer:
             now = self._clock()
             self._expire(now)
             if captured_at < now - self._candidate_retention_seconds:
+                self._dropped("expired_frames")
                 return
             run = self._runs[-1] if self._runs else None
             if (
@@ -125,6 +132,7 @@ class NotificationFrameBuffer:
             run.samples.append(sample)
             self._last_captured_at = captured_at
             if len(run.samples) > max(3, self._minimum_run_samples + 1):
+                before = len(run.samples)
                 representatives = (
                     *run.samples[: max(1, self._minimum_run_samples - 1)],
                     max(run.samples, key=lambda item: item.activity),
@@ -134,8 +142,10 @@ class NotificationFrameBuffer:
                     {id(item): item for item in representatives}.values(),
                     key=lambda item: item.captured_at,
                 )
+                self._dropped("compressed_frames", before - len(run.samples))
             while self.pending_candidates > self._candidate_capacity:
                 self._runs[0].samples.pop(0)
+                self._dropped("capacity_drops")
                 if not self._runs[0].samples:
                     self._runs.popleft()
             self._condition.notify()
@@ -144,7 +154,9 @@ class NotificationFrameBuffer:
         cutoff = now - self._candidate_retention_seconds
         while self._runs:
             run = self._runs[0]
+            before = len(run.samples)
             run.samples[:] = [item for item in run.samples if item.captured_at >= cutoff]
+            self._dropped("expired_frames", before - len(run.samples))
             if run.samples:
                 break
             self._runs.popleft()

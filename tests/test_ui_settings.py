@@ -40,6 +40,10 @@ class SettingsBehaviorTests(unittest.TestCase):
 
     def test_recognition_status_hides_diagnostics_but_keeps_useful_outcome(self) -> None:
         self.assertEqual(
+            "目标文字不够清晰，暂不计数，等待确认",
+            compact_recognition_status("[OCR_UNCERTAIN] GPU OCR diagnostics"),
+        )
+        self.assertEqual(
             "已找到并截图游戏窗口，正在启动 GPU OCR…",
             compact_recognition_status("[CAPTURE_READY] 游戏窗口首帧捕获成功"),
         )

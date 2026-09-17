@@ -27,7 +27,12 @@ class PresenceGate:
         self._enter_streak = 0
         self._exit_streak = 0
 
-    def observe(self, present: bool) -> bool:
+    def observe(self, present: bool | None) -> bool:
+        # A weakly read target is neither a countable hit nor disappearance.
+        # It breaks consecutive evidence without forgetting an existing count.
+        if present is None:
+            self.interrupt()
+            return False
         if self._armed:
             self._enter_streak = self._enter_streak + 1 if present else 0
             if self._enter_streak >= self.enter_frames:

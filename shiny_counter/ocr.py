@@ -217,7 +217,11 @@ class EasyOCREngine:
         expected_hashes: Mapping[str, str] | None = OCR_MODEL_SHA256,
         model_sources: Mapping[str, Iterable[str]] | None = None,
         downloader: Callable[[str, Path], None] | None = None,
+        experimental_batch_size: int | None = None,
     ) -> None:
+        if experimental_batch_size not in (None, 1, 4, 8):
+            raise ValueError("experimental OCR batch size must be 1, 4 or 8")
+        self._experimental_batch_size = experimental_batch_size
         try:
             import easyocr
             import torch
@@ -256,7 +260,11 @@ class EasyOCREngine:
 
     def read(self, frame: Any) -> list[OCRText]:
         try:
-            raw_results = self.reader.readtext(frame, detail=1, paragraph=False)
+            # EasyOCR batches text boxes WITHIN this image, never queued frames.
+            options = {}
+            if self._experimental_batch_size is not None:
+                options["batch_size"] = self._experimental_batch_size
+            raw_results = self.reader.readtext(frame, detail=1, paragraph=False, **options)
         except Exception as error:
             raise OCRError(f"OCR 识别失败：{error}") from error
         results: list[OCRText] = []
