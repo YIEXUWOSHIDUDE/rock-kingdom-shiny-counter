@@ -18,9 +18,11 @@ from .storage import AppSettings
 CAPTURE_INTERVAL_SECONDS = 0.05
 
 
-def ocr_result_status_code(recognized_text: str, matched: bool) -> str:
+def ocr_result_status_code(recognized_text: str, matched: bool, *, uncertain: bool = False) -> str:
     if matched:
         return "OCR_MATCH"
+    if uncertain:
+        return "OCR_UNCERTAIN"
     return "OCR_TEXT_NO_MATCH" if recognized_text else "OCR_NO_TEXT"
 
 
@@ -247,7 +249,7 @@ class RecognitionWorker(QThread):
                 )
                 if match is None:
                     preview = joined[:30] if joined else "未识别到文字"
-                    status_code = ocr_result_status_code(joined, False)
+                    status_code = ocr_result_status_code(joined, False, uncertain=decision.uncertain)
                     self.status_changed.emit(
                         f"[{status_code}] OCR {engine.device_label} · {elapsed_ms} ms"
                         f" · 缓冲 {queue_delay_ms} ms：{preview}",

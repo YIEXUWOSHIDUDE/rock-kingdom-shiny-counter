@@ -20,6 +20,7 @@ class RecognitionDecision:
     match: OCRMatch | None
     counted: bool
     accepted: bool = True
+    uncertain: bool = False
 
 
 class BannerRecognitionStream:
@@ -40,6 +41,9 @@ class BannerRecognitionStream:
             performance=performance,
         )
         self._matcher = OCRKeywordMatcher(self.profile.keywords, self.profile.min_confidence)
+        # Exact target text below the counting threshold must not confirm absence.
+        # This matcher never grants a count or replaces the user's threshold.
+        self._weak_matcher = OCRKeywordMatcher(self.profile.keywords, 0.0)
         self._gate = PresenceGate(self.profile.enter_frames, self.profile.exit_frames)
         self._lock = threading.RLock()
         self._paused = False
@@ -88,10 +92,13 @@ class BannerRecognitionStream:
             self._last_observed_at = sample.captured_at
             texts = list(texts)
             match = self._matcher.match(texts)
+            uncertain = match is None and self._weak_matcher.match(texts) is not None
+            presence = None if uncertain else match is not None
             return RecognitionDecision(
                 text=" | ".join(item.text for item in texts),
                 match=match,
-                counted=self._gate.observe(match is not None),
+                counted=self._gate.observe(presence),
+                uncertain=uncertain,
             )
 
     def set_paused(self, paused: bool) -> None:

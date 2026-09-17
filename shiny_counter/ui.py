@@ -115,6 +115,7 @@ def compact_recognition_status(message: str) -> str:
         "CAPTURE_READY": "已找到并截图游戏窗口，正在启动 GPU OCR…",
         "OCR_READY": "自动计数已就绪，等待结算横幅",
         "OCR_NO_TEXT": "识别正常，等待结算横幅",
+        "OCR_UNCERTAIN": "目标文字不够清晰，暂不计数，等待确认",
         "OCR_MATCH": "已识别横幅，等待本次提示结束",
         "COUNTED": "已识别结算横幅，计数 +1",
         "CAPTURE_UNAVAILABLE": "游戏窗口暂时无法截图，请恢复游戏窗口",

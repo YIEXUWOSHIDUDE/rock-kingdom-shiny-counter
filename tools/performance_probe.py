@@ -173,6 +173,7 @@ def main():
                 "captured_seconds": sample.captured_at - started,
                 "completed_seconds": time.monotonic() - started,
                 "accepted": result.accepted, "matched": result.match is not None,
+                "uncertain": result.uncertain,
                 "confidence": result.match.confidence if result.match is not None else None,
                 "counted": result.counted,
             })

@@ -279,6 +279,7 @@ class RecognitionWorkerTests(unittest.TestCase):
             )
 
     def test_ocr_result_status_codes_distinguish_pipeline_outcomes(self) -> None:
+        self.assertEqual("OCR_UNCERTAIN", ocr_result_status_code("目标文字", False, uncertain=True))
         self.assertEqual("OCR_NO_TEXT", ocr_result_status_code("", False))
         self.assertEqual(
             "OCR_TEXT_NO_MATCH",
