@@ -13,9 +13,15 @@ from PySide6.QtCore import Qt
 
 from shiny_counter.capture import CaptureError, WindowBinding
 from shiny_counter.gpu_policy import GPUCompatibilityError
-from shiny_counter.ocr import OCRText
+from shiny_counter.ocr import OCRText, crop_notification_banner
 from shiny_counter.storage import AppSettings
 from shiny_counter.worker import RecognitionWorker, ocr_result_status_code
+
+
+class FullFrameCaptureDouble:
+    def capture_banner(self, expected_size, profile):
+        frame, size = self.capture_client(expected_size)
+        return crop_notification_banner(frame, profile), size
 
 
 class RecognitionWorkerTests(unittest.TestCase):
@@ -42,7 +48,7 @@ class RecognitionWorkerTests(unittest.TestCase):
         statuses: list[str] = []
         errors: list[str] = []
 
-        class FakeCapture:
+        class FakeCapture(FullFrameCaptureDouble):
             def __init__(self, binding):
                 self.binding = binding
 
@@ -145,7 +151,7 @@ class RecognitionWorkerTests(unittest.TestCase):
         statuses: list[str] = []
         errors: list[str] = []
 
-        class FakeCapture:
+        class FakeCapture(FullFrameCaptureDouble):
             def __init__(self, binding):
                 self.binding = binding
 
@@ -197,7 +203,7 @@ class RecognitionWorkerTests(unittest.TestCase):
             self.assertNotRegex(message, r"\+\s*1")
 
     def test_pausing_during_gpu_read_discards_the_inflight_count(self) -> None:
-        class FakeCapture:
+        class FakeCapture(FullFrameCaptureDouble):
             def __init__(self, binding):
                 self.binding = binding
 
@@ -350,7 +356,7 @@ class RecognitionWorkerTests(unittest.TestCase):
             )
 
     def test_capture_keeps_buffering_while_gpu_ocr_is_busy(self) -> None:
-        class FakeCapture:
+        class FakeCapture(FullFrameCaptureDouble):
             instance = None
 
             def __init__(self, binding) -> None:

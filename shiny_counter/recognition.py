@@ -25,17 +25,19 @@ class RecognitionDecision:
 class BannerRecognitionStream:
     """Own the crop, chronological frame delivery, matching and count gate.
 
-    The capture producer offers full client frames; the GPU consumer reads a
-    returned crop and submits OCR text for that same sample. Pixel activity is
+    The producer offers pre-cropped banners (or full frames through offer);
+    the GPU consumer submits OCR text for that same sample. Pixel activity is
     only a buffering hint and never grants permission to count.
     """
 
-    def __init__(self, settings: AppSettings, *, clock: Callable[[], float] | None = None):
+    def __init__(self, settings: AppSettings, *, clock: Callable[[], float] | None = None, performance=None):
         self.profile = settings.recognition_profile()
         self._clock = clock or time.monotonic
+        self._performance = performance
         self._frames = NotificationFrameBuffer(
             clock=self._clock,
             minimum_run_samples=max(self.profile.enter_frames, self.profile.exit_frames),
+            performance=performance,
         )
         self._matcher = OCRKeywordMatcher(self.profile.keywords, self.profile.min_confidence)
         self._gate = PresenceGate(self.profile.enter_frames, self.profile.exit_frames)
@@ -46,13 +48,22 @@ class BannerRecognitionStream:
         self._issued: tuple[FrameSample, float] | None = None
 
     def offer(self, frame, *, captured_at: float | None = None) -> None:
+        """Full-frame compatibility / replay entrance, crops exactly once."""
+        self.offer_banner(crop_notification_banner(frame, self.profile), captured_at=captured_at)
+
+    def offer_banner(self, banner, *, captured_at: float | None = None) -> None:
+        """Already-cropped input; buffer owns an independent snapshot."""
         with self._lock:
             if not self._paused and not self._closed:
-                self._frames.offer(crop_notification_banner(frame, self.profile), captured_at=captured_at)
+                self._frames.offer(banner, captured_at=captured_at)
+                if self._performance is not None:
+                    self._performance.gauge("queue_length", self._frames.pending_candidates)
 
     def take(self, *, timeout: float | None = None) -> FrameSample | None:
         # Never hold the stream lock while waiting for the capture producer.
         sample = self._frames.take(timeout=timeout)
+        if self._performance is not None:
+            self._performance.gauge("queue_length", self._frames.pending_candidates)
         with self._lock:
             if (sample is None or self._paused or self._closed
                     or not self._frames.is_current(sample)):

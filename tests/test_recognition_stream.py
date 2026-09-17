@@ -2,12 +2,41 @@ import unittest
 
 import numpy as np
 
-from shiny_counter.ocr import OCRText
+from shiny_counter.ocr import OCRText, crop_notification_banner
 from shiny_counter.recognition import BannerRecognitionStream
 from shiny_counter.storage import AppSettings
 
 
 class BannerRecognitionStreamTests(unittest.TestCase):
+    def test_full_and_banner_entrances_match_short_events_and_pause(self):
+        for pre_cropped in (False, True):
+            with self.subTest(pre_cropped=pre_cropped):
+                now = [0.0]
+                stream = BannerRecognitionStream(AppSettings(), clock=lambda: now[0])
+
+                def observe(present):
+                    now[0] += .05  # One-frame short event, not a pixel-based count.
+                    frame = np.full((100, 300, 3), 180 if present else 0, np.uint8)
+                    if pre_cropped:
+                        stream.offer_banner(crop_notification_banner(frame, stream.profile))
+                    else:
+                        stream.offer(frame)
+                    sample = stream.take(timeout=0)
+                    return stream.observe(sample, [OCRText(stream.profile.keywords[0], .99)] if present else []).counted
+
+                observed = [observe(present) for present in (False, True, True, False, True, False, False, True)]
+                self.assertEqual(observed, [False, True, False, False, False, False, False, True])
+                stream.set_paused(True)
+                stream.set_paused(False)
+                self.assertFalse(observe(True))
+                self.assertFalse(observe(False))
+                stream.invalidate()  # Capture gap cannot complete absence confirmation.
+                self.assertFalse(observe(False))
+                self.assertFalse(observe(True))
+                self.assertFalse(observe(False))
+                self.assertFalse(observe(False))
+                self.assertTrue(observe(True))
+
     def test_one_banner_stays_counted_across_pause_until_real_absence(self):
         now = [0.0]
         stream = BannerRecognitionStream(AppSettings(), clock=lambda: now[0])
