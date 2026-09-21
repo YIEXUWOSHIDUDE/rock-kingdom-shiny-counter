@@ -139,17 +139,26 @@ def probe_gpu_runtime(
                 f"EasyOCR 实际设备为 {reader_device or 'unknown'}；不允许 CPU 回退。"
             )
 
-        stage = "easyocr_inference"
         if probe_image is None:
+            stage = "probe_image_load"
             import cv2
+            import numpy as np
 
             if probe_image_path is None or not probe_image_path.is_file():
                 raise FileNotFoundError("安装包缺少固定中文 OCR 探针图片。")
-            probe_hash = hashlib.sha256(probe_image_path.read_bytes()).hexdigest()
+            probe_bytes = probe_image_path.read_bytes()
+            probe_hash = hashlib.sha256(probe_bytes).hexdigest()
             details["probe_image_sha256"] = probe_hash
-            probe_image = cv2.imread(str(probe_image_path))
+            if not probe_bytes:
+                raise ValueError("固定中文 OCR 探针图片为空。")
+            # OpenCV's Windows filename API can fail on non-ASCII user paths.
+            # Decode the same bytes we hashed; pathlib handles Unicode paths.
+            probe_image = cv2.imdecode(
+                np.frombuffer(probe_bytes, dtype=np.uint8), cv2.IMREAD_COLOR
+            )
             if probe_image is None:
-                raise ValueError("无法读取固定中文 OCR 探针图片。")
+                raise ValueError("无法解码固定中文 OCR 探针图片，文件可能损坏。")
+        stage = "easyocr_inference"
         started = time.monotonic()
         results = reader.readtext(probe_image, detail=1, paragraph=False)
         torch_module.cuda.synchronize()
